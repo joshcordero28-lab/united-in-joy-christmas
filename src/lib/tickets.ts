@@ -9,6 +9,12 @@ export function ticketUrl(baseUrl: string, token: string): string {
   return `${base}/ticket#${encodeURIComponent(token)}`;
 }
 
+/** Private registration-management link (hash credential — not a ticket QR). */
+export function manageUrl(baseUrl: string, managerToken: string): string {
+  const base = baseUrl.replace(/\/$/, "");
+  return `${base}/manage#${encodeURIComponent(managerToken)}`;
+}
+
 /** Accept a full ticket URL (hash or legacy path) or the opaque ticket code itself. */
 export function extractTicketToken(input: string): string {
   const raw = input.trim();

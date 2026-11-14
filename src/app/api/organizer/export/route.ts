@@ -27,7 +27,17 @@ export async function GET(request: Request) {
     const type = searchParams.get("type") || "attendees";
 
     if (type === "attendees") {
-      const rows = await prisma.attendee.findMany({ orderBy: { fullName: "asc" } });
+      const rows = await prisma.attendee.findMany({
+        orderBy: { fullName: "asc" },
+        include: {
+          registrationParty: {
+            select: { id: true, managerName: true, contactPhone: true, contactEmail: true },
+          },
+          audienceVotes: {
+            select: { castBy: true, group: { select: { groupName: true } } },
+          },
+        },
+      });
       const header = [
         "id",
         "fullName",
@@ -37,11 +47,18 @@ export async function GET(request: Request) {
         "registeredAt",
         "checkedInAt",
         "checkInMethod",
+        "partyId",
+        "managerName",
+        "managerPhone",
+        "managerEmail",
+        "voteGroup",
+        "voteCastBy",
       ];
       const lines = [
         header.join(","),
-        ...rows.map((r) =>
-          [
+        ...rows.map((r) => {
+          const vote = r.audienceVotes[0];
+          return [
             r.id,
             r.fullName,
             r.phone,
@@ -50,6 +67,45 @@ export async function GET(request: Request) {
             r.registeredAt.toISOString(),
             r.checkedInAt?.toISOString() || "",
             r.checkInMethod || "",
+            r.registrationPartyId,
+            r.registrationParty.managerName,
+            r.registrationParty.contactPhone,
+            r.registrationParty.contactEmail,
+            vote?.group.groupName || "",
+            vote?.castBy || "",
+          ]
+            .map(csvEscape)
+            .join(",");
+        }),
+      ];
+      return new NextResponse(lines.join("\n"), {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="attendees.csv"',
+        },
+      });
+    }
+
+    if (type === "votes") {
+      const rows = await prisma.audienceVote.findMany({
+        orderBy: { createdAt: "desc" },
+        include: {
+          voter: { select: { fullName: true, registrationPartyId: true } },
+          group: { select: { groupName: true } },
+          castByParty: { select: { managerName: true } },
+        },
+      });
+      const lines = [
+        "voteId,attendee,group,castBy,managerName,partyId,createdAt",
+        ...rows.map((r) =>
+          [
+            r.id,
+            r.voter.fullName,
+            r.group.groupName,
+            r.castBy,
+            r.castByParty?.managerName || "",
+            r.voter.registrationPartyId,
+            r.createdAt.toISOString(),
           ]
             .map(csvEscape)
             .join(","),
@@ -58,7 +114,7 @@ export async function GET(request: Request) {
       return new NextResponse(lines.join("\n"), {
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": 'attachment; filename="attendees.csv"',
+          "Content-Disposition": 'attachment; filename="audience-votes.csv"',
         },
       });
     }

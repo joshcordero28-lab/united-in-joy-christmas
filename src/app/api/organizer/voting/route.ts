@@ -49,6 +49,19 @@ export async function GET() {
       }))
       .sort((a, b) => b.votes - a.votes);
 
+    const recentVotes = await prisma.audienceVote.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        castBy: true,
+        createdAt: true,
+        voter: { select: { fullName: true, registrationPartyId: true } },
+        group: { select: { groupName: true } },
+        castByParty: { select: { managerName: true } },
+      },
+    });
+
     return NextResponse.json({
       visibility: event.talentVotingVisibility,
       talentVotingState:
@@ -60,6 +73,15 @@ export async function GET() {
       ties: detectTie(results),
       voteCount: await prisma.audienceVote.count(),
       approvedGroups: groups,
+      ballotAudit: recentVotes.map((v) => ({
+        id: v.id,
+        attendeeName: v.voter.fullName,
+        groupName: v.group.groupName,
+        castBy: v.castBy,
+        managerName: v.castByParty?.managerName || null,
+        partyId: v.voter.registrationPartyId,
+        createdAt: v.createdAt,
+      })),
       legacyKingQueenVoteCount: await prisma.legacyKingQueenVote.count(),
       publicPhase: describePhase(event),
       note: "Audience Choice is separate from any judged overall talent-show winner unless you announce otherwise.",
