@@ -6,11 +6,17 @@ import { SiteFooter } from "@/components/SiteFooter";
 
 type VoteState = {
   voter: { id: string; fullName: string };
-  allowSelfVote: boolean;
-  kingVotingState: string;
-  queenVotingState: string;
-  myVotes: { category: string; nomineeId: string }[];
-  nominees: { id: string; fullName: string }[];
+  talentVotingState: string;
+  myVote: { groupId: string; createdAt: string } | null;
+  groups: {
+    id: string;
+    groupName: string;
+    performanceTitle: string;
+    talentType: string;
+    performanceOrder: number | null;
+  }[];
+  label: string;
+  resultsLabel: string;
 };
 
 export default function VotePage() {
@@ -54,34 +60,34 @@ export default function VotePage() {
     await refresh();
   }
 
-  async function cast(category: "KING" | "QUEEN", nomineeId: string) {
+  async function cast(groupId: string) {
     setError(null);
     setMessage(null);
     const res = await fetch("/api/vote", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category, nomineeId }),
+      body: JSON.stringify({ groupId }),
     });
     const data = await res.json();
     if (!res.ok) {
       setError(data.error || "Vote failed.");
       return;
     }
-    setMessage(`Vote recorded for ${category}.`);
+    setMessage("Your Audience Choice vote is locked in.");
     await refresh();
   }
-
-  const votedKing = state?.myVotes.find((v) => v.category === "KING");
-  const votedQueen = state?.myVotes.find((v) => v.category === "QUEEN");
 
   return (
     <div className="page-shell">
       <SiteHeader />
       <div className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
-        <p className="script-mark text-2xl text-[var(--red)]">Crown the night</p>
-        <h1 className="brand-mark text-4xl text-[var(--red)]">King & Queen</h1>
+        <p className="script-mark text-2xl text-[var(--red)]">Audience Choice</p>
+        <h1 className="brand-mark text-4xl text-[var(--red)]">
+          Vote for Your Favorite Group
+        </h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Vote once per category. Totals stay hidden until the organizer reveals them.
+          One vote per checked-in attendee for one approved talent-show group. Totals
+          stay hidden until the organizer reveals Audience Choice results.
         </p>
 
         {!loggedIn ? (
@@ -117,87 +123,66 @@ export default function VotePage() {
           </form>
         ) : (
           state && (
-            <div className="mt-8 space-y-8">
-              <p className="font-semibold text-[var(--green)]">
-                Signed in as {state.voter.fullName}
-              </p>
+            <div className="mt-8 space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-semibold text-[var(--green)]">
+                  Signed in as {state.voter.fullName}
+                </p>
+                <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--red)]">
+                  {state.talentVotingState}
+                </span>
+              </div>
               {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
               {message && <p className="font-semibold text-[var(--green)]">{message}</p>}
 
-              <CategoryBlock
-                title="King of the Night"
-                open={state.kingVotingState === "OPEN"}
-                stateLabel={state.kingVotingState}
-                voted={Boolean(votedKing)}
-                nominees={state.nominees.filter(
-                  (n) => state.allowSelfVote || n.id !== state.voter.id,
-                )}
-                onVote={(id) => cast("KING", id)}
-              />
-              <CategoryBlock
-                title="Queen of the Night"
-                open={state.queenVotingState === "OPEN"}
-                stateLabel={state.queenVotingState}
-                voted={Boolean(votedQueen)}
-                nominees={state.nominees.filter(
-                  (n) => state.allowSelfVote || n.id !== state.voter.id,
-                )}
-                onVote={(id) => cast("QUEEN", id)}
-              />
+              {state.talentVotingState !== "OPEN" && (
+                <p className="panel p-4 text-[var(--ink-soft)]">
+                  Audience voting is not open right now.
+                </p>
+              )}
+
+              {state.talentVotingState === "OPEN" && state.myVote && (
+                <p className="panel p-4 font-semibold text-[var(--green)]">
+                  Your vote is locked in. Thank you!
+                </p>
+              )}
+
+              {state.talentVotingState === "OPEN" && !state.myVote && (
+                <div className="space-y-3">
+                  {state.groups.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className="w-full rounded-2xl border border-[var(--red)]/15 bg-white/80 px-4 py-4 text-left transition hover:border-[var(--gold)] hover:shadow-md"
+                      onClick={() => cast(g.id)}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          {g.performanceOrder != null && (
+                            <p className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
+                              Performance #{g.performanceOrder}
+                            </p>
+                          )}
+                          <p className="brand-mark text-xl text-[var(--red)]">{g.groupName}</p>
+                          <p className="text-sm text-[var(--ink)]">{g.performanceTitle}</p>
+                          <p className="text-xs text-[var(--ink-soft)]">{g.talentType}</p>
+                        </div>
+                        <span className="btn btn-primary !min-h-10 !px-4 !text-sm">Vote</span>
+                      </div>
+                    </button>
+                  ))}
+                  {state.groups.length === 0 && (
+                    <p className="text-[var(--ink-soft)]">
+                      No approved groups yet. Check back after organizers approve acts.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )
         )}
       </div>
       <SiteFooter />
     </div>
-  );
-}
-
-function CategoryBlock({
-  title,
-  open,
-  stateLabel,
-  voted,
-  nominees,
-  onVote,
-}: {
-  title: string;
-  open: boolean;
-  stateLabel: string;
-  voted: boolean;
-  nominees: { id: string; fullName: string }[];
-  onVote: (id: string) => void;
-}) {
-  return (
-    <section className="panel p-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="brand-mark text-2xl text-[var(--red)]">{title}</h2>
-        <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
-          {stateLabel}
-        </span>
-      </div>
-      {!open && <p className="text-[var(--ink-soft)]">Voting is not open for this category.</p>}
-      {open && voted && (
-        <p className="font-semibold text-[var(--green)]">Your vote is locked in.</p>
-      )}
-      {open && !voted && (
-        <div className="space-y-2">
-          {nominees.map((n) => (
-            <button
-              key={n.id}
-              type="button"
-              className="btn btn-secondary w-full justify-between"
-              onClick={() => onVote(n.id)}
-            >
-              <span>{n.fullName}</span>
-              <span>Vote</span>
-            </button>
-          ))}
-          {nominees.length === 0 && (
-            <p className="text-[var(--ink-soft)]">No checked-in nominees yet.</p>
-          )}
-        </div>
-      )}
-    </section>
   );
 }

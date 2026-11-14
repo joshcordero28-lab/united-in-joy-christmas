@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { VoteCategory, VotingState } from "@prisma/client";
+import { VotingState } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getVoterSession } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
@@ -8,8 +8,7 @@ import { writeAudit } from "@/lib/audit";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 const schema = z.object({
-  category: z.nativeEnum(VoteCategory),
-  nomineeId: z.string().min(1),
+  groupId: z.string().min(1),
 });
 
 export async function POST(request: Request) {
@@ -32,10 +31,11 @@ export async function POST(request: Request) {
     }
 
     const event = await getEventConfig();
-    const state =
-      parsed.data.category === "KING" ? event.kingVotingState : event.queenVotingState;
-    if (state !== VotingState.OPEN) {
-      return NextResponse.json({ error: "Voting is not open for this category." }, { status: 403 });
+    if (event.talentVotingState !== VotingState.OPEN) {
+      return NextResponse.json(
+        { error: "Audience voting is not open." },
+        { status: 403 },
+      );
     }
 
     const voter = await prisma.attendee.findUnique({ where: { id: session.attendeeId } });
@@ -46,41 +46,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Check-in required before voting." }, { status: 403 });
     }
 
-    const nominee = await prisma.attendee.findUnique({ where: { id: parsed.data.nomineeId } });
-    if (!nominee || nominee.status !== "ISSUED" || !nominee.checkedInAt) {
+    const group = await prisma.talentGroup.findUnique({
+      where: { id: parsed.data.groupId },
+    });
+    if (!group || group.status !== "APPROVED") {
       return NextResponse.json(
-        { error: "Nominee must be a checked-in attendee." },
+        { error: "You can only vote for an approved performing group." },
         { status: 400 },
       );
     }
 
-    if (!event.allowSelfVote && nominee.id === voter.id) {
-      return NextResponse.json({ error: "Self-voting is disabled." }, { status: 403 });
-    }
-
     try {
-      const vote = await prisma.vote.create({
+      const vote = await prisma.audienceVote.create({
         data: {
-          category: parsed.data.category,
           voterId: voter.id,
-          nomineeId: nominee.id,
+          groupId: group.id,
         },
       });
 
       await writeAudit({
         actorLabel: voter.fullName,
-        action: "vote.cast",
-        entityType: "Vote",
+        action: "audience_vote.cast",
+        entityType: "AudienceVote",
         entityId: vote.id,
-        detail: `category=${parsed.data.category}`,
+        detail: `group=${group.groupName}`,
       });
 
-      return NextResponse.json({ ok: true, category: parsed.data.category });
+      return NextResponse.json({ ok: true, groupId: group.id });
     } catch (e: unknown) {
       const code = typeof e === "object" && e && "code" in e ? (e as { code: string }).code : "";
       if (code === "P2002") {
         return NextResponse.json(
-          { error: "You already voted in this category." },
+          { error: "You already cast your Audience Choice vote." },
           { status: 409 },
         );
       }
@@ -99,23 +96,29 @@ export async function GET() {
   }
 
   const event = await getEventConfig();
-  const myVotes = await prisma.vote.findMany({
+  const myVote = await prisma.audienceVote.findUnique({
     where: { voterId: session.attendeeId },
-    select: { category: true, nomineeId: true, createdAt: true },
+    select: { groupId: true, createdAt: true },
   });
 
-  const nominees = await prisma.attendee.findMany({
-    where: { status: "ISSUED", checkedInAt: { not: null } },
-    select: { id: true, fullName: true },
-    orderBy: { fullName: "asc" },
+  const groups = await prisma.talentGroup.findMany({
+    where: { status: "APPROVED" },
+    orderBy: [{ performanceOrder: "asc" }, { groupName: "asc" }],
+    select: {
+      id: true,
+      groupName: true,
+      performanceTitle: true,
+      talentType: true,
+      performanceOrder: true,
+    },
   });
 
   return NextResponse.json({
     voter: { id: session.attendeeId, fullName: session.attendeeName },
-    allowSelfVote: event.allowSelfVote,
-    kingVotingState: event.kingVotingState,
-    queenVotingState: event.queenVotingState,
-    myVotes,
-    nominees,
+    talentVotingState: event.talentVotingState,
+    myVote,
+    groups,
+    label: "Vote for Your Favorite Group",
+    resultsLabel: "Audience Choice",
   });
 }

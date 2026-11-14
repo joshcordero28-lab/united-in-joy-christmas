@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { VoteCategory, VotingState } from "@prisma/client";
+import { VotingState } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getStaffSession, requireStaff } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
 import { writeAudit } from "@/lib/audit";
 
 const patchSchema = z.object({
-  category: z.nativeEnum(VoteCategory),
   state: z.nativeEnum(VotingState),
-  allowSelfVote: z.boolean().optional(),
-  resolveTieWinnerId: z.string().optional(),
+  resolveTieGroupId: z.string().optional(),
 });
 
 export async function GET() {
@@ -23,60 +21,46 @@ export async function GET() {
     }
 
     const event = await getEventConfig();
-    const includeTotals =
-      event.kingVotingState === "REVEALED" || event.queenVotingState === "REVEALED";
+    const includeTotals = event.talentVotingState === "REVEALED";
 
     const tallies = includeTotals
-      ? await prisma.vote.groupBy({
-          by: ["category", "nomineeId"],
+      ? await prisma.audienceVote.groupBy({
+          by: ["groupId"],
           _count: { _all: true },
         })
       : [];
 
-    const nominees = await prisma.attendee.findMany({
-      where: { id: { in: tallies.map((t) => t.nomineeId) } },
-      select: { id: true, fullName: true },
+    const groups = await prisma.talentGroup.findMany({
+      where: { status: "APPROVED" },
+      select: { id: true, groupName: true, performanceTitle: true, performanceOrder: true },
+      orderBy: [{ performanceOrder: "asc" }, { groupName: "asc" }],
     });
-    const nameById = Object.fromEntries(nominees.map((n) => [n.id, n.fullName]));
+    const nameById = Object.fromEntries(
+      groups.map((g) => [g.id, { name: g.groupName, title: g.performanceTitle }]),
+    );
 
-    const results = {
-      KING: tallies
-        .filter((t) => t.category === "KING")
-        .map((t) => ({
-          nomineeId: t.nomineeId,
-          fullName: nameById[t.nomineeId] || t.nomineeId,
-          votes: t._count._all,
-        }))
-        .sort((a, b) => b.votes - a.votes),
-      QUEEN: tallies
-        .filter((t) => t.category === "QUEEN")
-        .map((t) => ({
-          nomineeId: t.nomineeId,
-          fullName: nameById[t.nomineeId] || t.nomineeId,
-          votes: t._count._all,
-        }))
-        .sort((a, b) => b.votes - a.votes),
-    };
+    const results = tallies
+      .map((t) => ({
+        groupId: t.groupId,
+        groupName: nameById[t.groupId]?.name || t.groupId,
+        performanceTitle: nameById[t.groupId]?.title || "",
+        votes: t._count._all,
+      }))
+      .sort((a, b) => b.votes - a.votes);
+
+    const tie = detectTie(results);
+
+    const legacyCount = await prisma.legacyKingQueenVote.count();
 
     return NextResponse.json({
-      kingVotingState: event.kingVotingState,
-      queenVotingState: event.queenVotingState,
-      allowSelfVote: event.allowSelfVote,
-      results:
-        event.kingVotingState === "REVEALED" || event.queenVotingState === "REVEALED"
-          ? {
-              KING: event.kingVotingState === "REVEALED" ? results.KING : null,
-              QUEEN: event.queenVotingState === "REVEALED" ? results.QUEEN : null,
-            }
-          : null,
-      ties: {
-        KING: detectTie(results.KING),
-        QUEEN: detectTie(results.QUEEN),
-      },
-      voteCounts: {
-        KING: await prisma.vote.count({ where: { category: "KING" } }),
-        QUEEN: await prisma.vote.count({ where: { category: "QUEEN" } }),
-      },
+      talentVotingState: event.talentVotingState,
+      resultsLabel: "Audience Choice",
+      results: includeTotals ? results : null,
+      ties: includeTotals ? tie : null,
+      voteCount: await prisma.audienceVote.count(),
+      approvedGroups: groups,
+      legacyKingQueenVoteCount: legacyCount,
+      note: "Audience Choice is the audience favorite poll — not declared as the overall talent-show winner unless organizers state that separately.",
     });
   } catch (err) {
     console.error("voting status failed", err);
@@ -84,7 +68,7 @@ export async function GET() {
   }
 }
 
-function detectTie(rows: { nomineeId: string; fullName: string; votes: number }[]) {
+function detectTie(rows: { groupId: string; groupName: string; votes: number }[]) {
   if (rows.length < 2) return null;
   const top = rows[0].votes;
   const tied = rows.filter((r) => r.votes === top && top > 0);
@@ -108,64 +92,52 @@ export async function PATCH(request: Request) {
     }
 
     if (parsed.data.state === "REVEALED") {
-      const tallies = await prisma.vote.groupBy({
-        by: ["nomineeId"],
-        where: { category: parsed.data.category },
+      const tallies = await prisma.audienceVote.groupBy({
+        by: ["groupId"],
         _count: { _all: true },
       });
       const sorted = [...tallies].sort((a, b) => b._count._all - a._count._all);
       if (sorted.length >= 2 && sorted[0]._count._all === sorted[1]._count._all) {
-        if (!parsed.data.resolveTieWinnerId) {
+        if (!parsed.data.resolveTieGroupId) {
           return NextResponse.json(
             {
-              error: "Tie detected. Provide resolveTieWinnerId to declare a winner.",
+              error: "Tie detected for Audience Choice. Provide resolveTieGroupId.",
               tied: sorted
                 .filter((s) => s._count._all === sorted[0]._count._all)
-                .map((s) => s.nomineeId),
+                .map((s) => s.groupId),
             },
             { status: 409 },
           );
         }
         const ok = sorted.some(
           (s) =>
-            s.nomineeId === parsed.data.resolveTieWinnerId &&
+            s.groupId === parsed.data.resolveTieGroupId &&
             s._count._all === sorted[0]._count._all,
         );
         if (!ok) {
-          return NextResponse.json({ error: "Invalid tie resolution nominee." }, { status: 400 });
+          return NextResponse.json({ error: "Invalid tie resolution group." }, { status: 400 });
         }
         await writeAudit({
           actorId: session.staffId,
           actorLabel: session.username,
-          action: "voting.tie_resolved",
-          entityType: "VoteCategory",
-          entityId: parsed.data.category,
-          detail: `winner=${parsed.data.resolveTieWinnerId}`,
+          action: "audience_vote.tie_resolved",
+          entityType: "AudienceChoice",
+          entityId: parsed.data.resolveTieGroupId,
+          detail: `winnerGroup=${parsed.data.resolveTieGroupId}`,
         });
       }
     }
 
-    const data =
-      parsed.data.category === "KING"
-        ? { kingVotingState: parsed.data.state }
-        : { queenVotingState: parsed.data.state };
-
     await prisma.eventConfig.update({
       where: { id: "default" },
-      data: {
-        ...data,
-        ...(parsed.data.allowSelfVote !== undefined
-          ? { allowSelfVote: parsed.data.allowSelfVote }
-          : {}),
-      },
+      data: { talentVotingState: parsed.data.state },
     });
 
     await writeAudit({
       actorId: session.staffId,
       actorLabel: session.username,
-      action: "voting.state_change",
-      entityType: "VoteCategory",
-      entityId: parsed.data.category,
+      action: "audience_vote.state_change",
+      entityType: "AudienceChoice",
       detail: `state=${parsed.data.state}`,
     });
 

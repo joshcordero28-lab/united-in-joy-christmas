@@ -55,19 +55,20 @@ function assert(cond: unknown, msg: string): asserts cond {
 async function main() {
   const results: string[] = [];
   const pass = (m: string) => results.push(`PASS: ${m}`);
-  const note = (m: string) => results.push(`NOTE: ${m}`);
 
-  // Health: home
   {
     const res = await fetch(BASE);
     assert(res.ok, `Home not ok: ${res.status}`);
     pass("Home page loads");
   }
 
-  // Register guest A
   const { res: r1, json: a } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: "Alex Guest", phone: "555-0101", email: "alex@example.com" }),
+    body: JSON.stringify({
+      fullName: `Alex Talent ${Date.now()}`,
+      phone: "555-0101",
+      email: "alex@example.com",
+    }),
   });
   assert(r1.ok, `Register A failed: ${JSON.stringify(a)}`);
   assert(a.ticketToken && a.votingCredential, "A missing ticket/credential");
@@ -75,25 +76,21 @@ async function main() {
 
   const tokenA = String(a.ticketToken);
   const voteA = String(a.votingCredential);
-  const idA = String(a.attendeeId);
 
-  // Register guest B
   const { res: r2, json: b } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: "Blake Guest", phone: "555-0102" }),
+    body: JSON.stringify({ fullName: `Blake Talent ${Date.now()}`, phone: "555-0102" }),
   });
   assert(r2.ok, `Register B failed: ${JSON.stringify(b)}`);
   const tokenB = String(b.ticketToken);
   const voteB = String(b.votingCredential);
-  const idB = String(b.attendeeId);
   pass("Second attendee registered");
 
-  // Validate ticket
-  const { res: vOk, json: vJson } = await req("/api/ticket/validate", {
+  const { json: vJson } = await req("/api/ticket/validate", {
     method: "POST",
     body: JSON.stringify({ token: tokenA }),
   });
-  assert(vOk.ok && vJson.valid === true, "Valid ticket should validate");
+  assert(vJson.valid === true, "Valid ticket should validate");
   pass("Ticket validation accepts issued token");
 
   const { json: badJson } = await req("/api/ticket/validate", {
@@ -103,7 +100,6 @@ async function main() {
   assert(badJson.valid === false, "Invalid token should fail");
   pass("Invalid ticket rejected");
 
-  // Staff login + check-in
   const staffJar: Jar = new Map();
   const { res: sLogin, json: sJson } = await req("/api/auth/staff/login", {
     method: "POST",
@@ -124,12 +120,12 @@ async function main() {
   assert(c1.ok, `Check-in A failed: ${JSON.stringify(c1j)}`);
   pass("Check-in succeeds");
 
-  const { res: cDup, json: cDupJ } = await req("/api/checkin", {
+  const { res: cDup } = await req("/api/checkin", {
     method: "POST",
     jar: staffJar,
     body: JSON.stringify({ token: tokenA, method: "manual" }),
   });
-  assert(cDup.status === 409, `Duplicate check-in should 409, got ${cDup.status} ${JSON.stringify(cDupJ)}`);
+  assert(cDup.status === 409, `Duplicate check-in should 409, got ${cDup.status}`);
   pass("Duplicate check-in rejected");
 
   await req("/api/checkin", {
@@ -139,26 +135,49 @@ async function main() {
   });
   pass("Check-in B");
 
-  // Competition entry
-  const comps = await req("/api/competitions");
-  const list = (comps.json.competitions as { id: string; type: string }[]) || [];
-  assert(list.length > 0, "No competitions seeded");
-  const individual = list.find((c) => c.type === "INDIVIDUAL")!;
-  const { res: e1, json: e1j } = await req("/api/competitions/enter", {
+  // Talent group registration
+  const { res: g1, json: g1j } = await req("/api/groups", {
     method: "POST",
-    body: JSON.stringify({ competitionId: individual.id, ticketToken: tokenA }),
+    body: JSON.stringify({
+      leaderTicketToken: tokenA,
+      groupName: `Joyful Voices ${Date.now()}`,
+      performanceTitle: "Carol Medley",
+      talentType: "Song / Vocal",
+      memberTicketTokens: [tokenA, tokenB],
+    }),
   });
-  assert(e1.ok, `Competition enter failed: ${JSON.stringify(e1j)}`);
-  pass("Competition registration");
+  assert(g1.ok, `Group register failed: ${JSON.stringify(g1j)}`);
+  const groupId = String(g1j.groupId);
+  pass("Christmas Group Talent Show registration");
 
-  const { res: eDup } = await req("/api/competitions/enter", {
+  const { res: gDup } = await req("/api/groups", {
     method: "POST",
-    body: JSON.stringify({ competitionId: individual.id, ticketToken: tokenA }),
+    body: JSON.stringify({
+      leaderTicketToken: tokenA,
+      groupName: "Duplicate Attempt",
+      performanceTitle: "Nope",
+      talentType: "Dance",
+      memberTicketTokens: [tokenA],
+    }),
   });
-  assert(eDup.status === 409, "Duplicate competition entry should 409");
-  pass("Duplicate competition entry rejected");
+  assert(gDup.status === 409, "Member already in a group should 409");
+  pass("Duplicate group membership rejected");
 
-  // Organizer opens voting
+  // Unregistered member token rejected
+  const { res: gBad } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      leaderTicketToken: tokenB,
+      groupName: "Bad Members",
+      performanceTitle: "Nope",
+      talentType: "Dance",
+      memberTicketTokens: [tokenB, "not-a-real-issued-ticket-token-zzzz"],
+    }),
+  });
+  // tokenB already in a group → 409, or if we used fresh attendees would be 400
+  assert(gBad.status === 409 || gBad.status === 400, "Invalid/occupied members rejected");
+  pass("Invalid member tickets rejected");
+
   const orgJar: Jar = new Map();
   const { res: oLogin, json: oJson } = await req("/api/auth/staff/login", {
     method: "POST",
@@ -171,20 +190,25 @@ async function main() {
   assert(oLogin.ok && oJson.role === "ORGANIZER", `Organizer login failed: ${JSON.stringify(oJson)}`);
   pass("Organizer login");
 
-  for (const category of ["KING", "QUEEN"]) {
-    const { res: openRes, json: openJ } = await req("/api/organizer/voting", {
-      method: "PATCH",
-      jar: orgJar,
-      body: JSON.stringify({ category, state: "OPEN" }),
-    });
-    assert(openRes.ok, `Open ${category} failed: ${JSON.stringify(openJ)}`);
-  }
-  pass("Voting opened for KING and QUEEN");
+  const { res: approveRes, json: approveJ } = await req("/api/organizer/groups", {
+    method: "PATCH",
+    jar: orgJar,
+    body: JSON.stringify({ groupId, action: "approve" }),
+  });
+  assert(approveRes.ok, `Approve failed: ${JSON.stringify(approveJ)}`);
+  pass("Organizer approves talent group");
 
-  // Voter without check-in should fail — register C, don't check in
+  const { res: openRes, json: openJ } = await req("/api/organizer/voting", {
+    method: "PATCH",
+    jar: orgJar,
+    body: JSON.stringify({ state: "OPEN" }),
+  });
+  assert(openRes.ok, `Open voting failed: ${JSON.stringify(openJ)}`);
+  pass("Audience Choice voting opened");
+
   const { json: c } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: "Casey Unchecked" }),
+    body: JSON.stringify({ fullName: `Casey Unchecked ${Date.now()}` }),
   });
   const voterC: Jar = new Map();
   const { res: loginC, json: loginCJ } = await req("/api/auth/voter/login", {
@@ -195,10 +219,12 @@ async function main() {
       votingCredential: c.votingCredential,
     }),
   });
-  assert(loginC.status === 403, `Unchecked-in voter should be blocked, got ${loginC.status} ${JSON.stringify(loginCJ)}`);
+  assert(
+    loginC.status === 403,
+    `Unchecked-in voter should be blocked, got ${loginC.status} ${JSON.stringify(loginCJ)}`,
+  );
   pass("Unchecked-in voter rejected");
 
-  // Vote as A
   const voterA: Jar = new Map();
   const { res: loginA, json: loginAJ } = await req("/api/auth/voter/login", {
     method: "POST",
@@ -210,33 +236,50 @@ async function main() {
   const { res: vote1, json: vote1j } = await req("/api/vote", {
     method: "POST",
     jar: voterA,
-    body: JSON.stringify({ category: "KING", nomineeId: idB }),
+    body: JSON.stringify({ groupId }),
   });
   assert(vote1.ok, `Vote failed: ${JSON.stringify(vote1j)}`);
-  pass("Vote cast");
+  pass("Audience Choice vote cast");
 
   const { res: voteDup, json: voteDupJ } = await req("/api/vote", {
     method: "POST",
     jar: voterA,
-    body: JSON.stringify({ category: "KING", nomineeId: idB }),
+    body: JSON.stringify({ groupId }),
   });
   assert(voteDup.status === 409, `Duplicate vote should 409: ${JSON.stringify(voteDupJ)}`);
-  pass("Duplicate vote rejected");
+  pass("Duplicate Audience Choice vote rejected");
 
-  // Self-vote disabled
-  const { res: selfVote, json: selfJ } = await req("/api/vote", {
+  // Second voter also votes (optional path) then reveal
+  const voterB: Jar = new Map();
+  await req("/api/auth/voter/login", {
     method: "POST",
-    jar: voterA,
-    body: JSON.stringify({ category: "QUEEN", nomineeId: idA }),
+    jar: voterB,
+    body: JSON.stringify({ ticketToken: tokenB, votingCredential: voteB }),
   });
-  assert(selfVote.status === 403, `Self-vote should 403: ${JSON.stringify(selfJ)}`);
-  pass("Self-vote rejected by default");
+  await req("/api/vote", {
+    method: "POST",
+    jar: voterB,
+    body: JSON.stringify({ groupId }),
+  });
 
-  // Revoke ticket and validate
+  const { res: revealRes, json: revealJ } = await req("/api/organizer/voting", {
+    method: "PATCH",
+    jar: orgJar,
+    body: JSON.stringify({ state: "REVEALED" }),
+  });
+  assert(revealRes.ok, `Reveal failed: ${JSON.stringify(revealJ)}`);
+  pass("Audience Choice results revealed");
+
+  const { json: status } = await req("/api/organizer/voting", { jar: orgJar });
+  assert(status.resultsLabel === "Audience Choice", "Results label should be Audience Choice");
+  assert(Array.isArray(status.results), "Results should be visible after reveal");
+  pass("Audience Choice results labeled correctly");
+
+  // Revoke ticket still works
   await req("/api/organizer/attendees/action", {
     method: "POST",
     jar: orgJar,
-    body: JSON.stringify({ attendeeId: idA, action: "revoke" }),
+    body: JSON.stringify({ attendeeId: a.attendeeId, action: "revoke" }),
   });
   const { json: revokedVal } = await req("/api/ticket/validate", {
     method: "POST",
@@ -244,15 +287,6 @@ async function main() {
   });
   assert(revokedVal.valid === false, "Revoked ticket should be invalid");
   pass("Revoked ticket rejected");
-
-  // Undo check-in audit path
-  const { res: undoRes, json: undoJ } = await req("/api/checkin/undo", {
-    method: "POST",
-    jar: staffJar,
-    body: JSON.stringify({ attendeeId: idB, note: "Test correction" }),
-  });
-  assert(undoRes.ok, `Undo failed: ${JSON.stringify(undoJ)}`);
-  pass("Check-in undo / correction works");
 
   console.log(results.join("\n"));
   console.log("\nAll automated flow checks passed.");

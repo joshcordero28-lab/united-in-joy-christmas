@@ -23,6 +23,7 @@ enum CompetitionType {
   TEAM
 }
 
+/// Archived King/Queen category enum — kept so LegacyKingQueenVote rows remain readable.
 enum VoteCategory {
   KING
   QUEEN
@@ -34,28 +35,40 @@ enum VotingState {
   REVEALED
 }
 
+enum GroupStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
 model EventConfig {
-  id                      String      @id @default("default")
-  name                    String      @default("United in Joy Christmas 2026")
-  dateLabel               String      @default("December 13, 2026")
-  venueLabel              String      @default("[VENUE — TBD]")
-  capacity                Int         @default(200)
-  registrationOpen        Boolean     @default(true)
-  requireApproval         Boolean     @default(false)
-  votingEnabledAfterCheckIn Boolean   @default(true)
-  allowSelfVote           Boolean     @default(false)
-  kingVotingState         VotingState @default(CLOSED)
-  queenVotingState        VotingState @default(CLOSED)
-  updatedAt               DateTime    @updatedAt
+  id                        String      @id @default("default")
+  name                      String      @default("United in Joy Christmas 2026")
+  dateLabel                 String      @default("December 13, 2026")
+  venueLabel                String      @default("[VENUE — TBD]")
+  capacity                  Int         @default(200)
+  registrationOpen          Boolean     @default(true)
+  requireApproval           Boolean     @default(false)
+  votingEnabledAfterCheckIn Boolean     @default(true)
+  /// Deprecated: King/Queen self-vote toggle (legacy UI removed).
+  allowSelfVote             Boolean     @default(false)
+  /// Deprecated: retained for history; use talentVotingState.
+  kingVotingState           VotingState @default(CLOSED)
+  /// Deprecated: retained for history; use talentVotingState.
+  queenVotingState          VotingState @default(CLOSED)
+  /// Audience Choice voting for Christmas Group Talent Show.
+  talentVotingState         VotingState @default(CLOSED)
+  updatedAt                 DateTime    @updatedAt
 }
 
 model StaffAccount {
-  id           String    @id @default(cuid())
-  username     String    @unique
+  id           String     @id @default(cuid())
+  username     String     @unique
   passwordHash String
   role         StaffRole
   displayName  String
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime   @default(now())
   auditLogs    AuditLog[]
 }
 
@@ -67,7 +80,6 @@ model Attendee {
   notes                String?
   ticketToken          String       @unique
   votingCredentialHash String
-  /// Plain credential shown once on confirmation; kept hashed for auth. Stored encrypted-at-rest optional future.
   votingCredentialHint String?
   status               TicketStatus @default(ISSUED)
   registeredAt         DateTime     @default(now())
@@ -80,9 +92,14 @@ model Attendee {
   updatedAt            DateTime     @updatedAt
 
   competitionEntries CompetitionEntry[]
-  votesCast          Vote[]             @relation("Voter")
-  votesReceived      Vote[]             @relation("Nominee")
+  /// Archived King/Queen votes cast by this attendee (read-only history).
+  legacyVotesCast    LegacyKingQueenVote[] @relation("LegacyVoter")
+  /// Archived King/Queen nominations received (read-only history).
+  legacyVotesReceived LegacyKingQueenVote[] @relation("LegacyNominee")
   checkInEvents      CheckInEvent[]
+  groupsLed          TalentGroup[]         @relation("GroupLeader")
+  groupMemberships   TalentGroupMember[]
+  audienceVotes      AudienceVote[]
 
   @@index([fullName])
   @@index([status])
@@ -90,16 +107,16 @@ model Attendee {
 }
 
 model Competition {
-  id          String          @id @default(cuid())
+  id          String             @id @default(cuid())
   name        String
   description String?
   type        CompetitionType
   maxEntries  Int?
   teamSizeMin Int?
   teamSizeMax Int?
-  isOpen      Boolean         @default(true)
-  sortOrder   Int             @default(0)
-  createdAt   DateTime        @default(now())
+  isOpen      Boolean            @default(true)
+  sortOrder   Int                @default(0)
+  createdAt   DateTime           @default(now())
   entries     CompetitionEntry[]
 }
 
@@ -117,18 +134,68 @@ model CompetitionEntry {
   @@index([competitionId])
 }
 
-model Vote {
-  id         String       @id @default(cuid())
-  category   VoteCategory
-  voterId    String
-  nomineeId  String
-  createdAt  DateTime     @default(now())
+/// Archived copy of King/Queen Vote rows. Original "Vote" table data is migrated here; never delete.
+model LegacyKingQueenVote {
+  id        String       @id
+  category  VoteCategory
+  voterId   String
+  nomineeId String
+  createdAt DateTime
+  archivedAt DateTime    @default(now())
 
-  voter   Attendee @relation("Voter", fields: [voterId], references: [id], onDelete: Cascade)
-  nominee Attendee @relation("Nominee", fields: [nomineeId], references: [id], onDelete: Cascade)
+  voter   Attendee @relation("LegacyVoter", fields: [voterId], references: [id], onDelete: Restrict)
+  nominee Attendee @relation("LegacyNominee", fields: [nomineeId], references: [id], onDelete: Restrict)
 
-  @@unique([category, voterId])
-  @@index([category, nomineeId])
+  @@index([category])
+  @@index([voterId])
+}
+
+model TalentGroup {
+  id                String      @id @default(cuid())
+  groupName         String
+  performanceTitle  String
+  talentType        String
+  leaderAttendeeId  String
+  status            GroupStatus @default(PENDING)
+  performanceOrder  Int?
+  rejectionNote     String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  leader  Attendee            @relation("GroupLeader", fields: [leaderAttendeeId], references: [id], onDelete: Restrict)
+  members TalentGroupMember[]
+  votes   AudienceVote[]
+
+  @@index([status])
+  @@index([performanceOrder])
+}
+
+model TalentGroupMember {
+  id         String   @id @default(cuid())
+  groupId    String
+  attendeeId String
+  createdAt  DateTime @default(now())
+
+  group    TalentGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  attendee Attendee    @relation(fields: [attendeeId], references: [id], onDelete: Restrict)
+
+  @@unique([groupId, attendeeId])
+  /// An attendee may belong to at most one talent group.
+  @@unique([attendeeId])
+  @@index([groupId])
+}
+
+/// One Audience Choice vote per checked-in attendee for one approved group.
+model AudienceVote {
+  id        String   @id @default(cuid())
+  voterId   String   @unique
+  groupId   String
+  createdAt DateTime @default(now())
+
+  voter Attendee    @relation(fields: [voterId], references: [id], onDelete: Cascade)
+  group TalentGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+
+  @@index([groupId])
 }
 
 model CheckInEvent {

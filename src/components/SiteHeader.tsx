@@ -27,10 +27,10 @@ export function SiteHeader({
             Register
           </Link>
           <Link className={link} href="/competitions">
-            Competitions
+            Talent Show
           </Link>
           <Link className={link} href="/vote">
-            Vote
+            Audience Choice
           </Link>
           <Link className={link} href="/staff">
             Staff

@@ -13,9 +13,7 @@ type Dashboard = {
     capacity: number;
     registrationOpen: boolean;
     requireApproval: boolean;
-    allowSelfVote: boolean;
-    kingVotingState: string;
-    queenVotingState: string;
+    talentVotingState?: string;
   };
   counts: {
     registered: number;
@@ -23,17 +21,20 @@ type Dashboard = {
     pending: number;
     revoked: number;
     checkedIn: number;
-    competitionEntries: number;
+    groupsPending: number;
+    groupsApproved: number;
     votes: number;
     capacity: number;
   };
-  competitions: {
+  groups: {
     id: string;
-    name: string;
-    type: string;
-    entryCount: number;
-    maxEntries: number | null;
-    isOpen: boolean;
+    groupName: string;
+    performanceTitle: string;
+    talentType: string;
+    status: string;
+    performanceOrder: number | null;
+    memberCount: number;
+    leaderName: string;
   }[];
 };
 
@@ -47,18 +48,13 @@ type Attendee = {
 };
 
 type VotingInfo = {
-  kingVotingState: string;
-  queenVotingState: string;
-  allowSelfVote: boolean;
-  results: null | {
-    KING: { nomineeId: string; fullName: string; votes: number }[] | null;
-    QUEEN: { nomineeId: string; fullName: string; votes: number }[] | null;
-  };
-  ties: {
-    KING: { nomineeId: string; fullName: string; votes: number }[] | null;
-    QUEEN: { nomineeId: string; fullName: string; votes: number }[] | null;
-  };
-  voteCounts: { KING: number; QUEEN: number };
+  talentVotingState: string;
+  resultsLabel: string;
+  results: null | { groupId: string; groupName: string; performanceTitle: string; votes: number }[];
+  ties: null | { groupId: string; groupName: string; votes: number }[];
+  voteCount: number;
+  legacyKingQueenVoteCount?: number;
+  note?: string;
 };
 
 export default function OrganizerPage() {
@@ -69,7 +65,9 @@ export default function OrganizerPage() {
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [q, setQ] = useState("");
   const [voting, setVoting] = useState<VotingInfo | null>(null);
-  const [logs, setLogs] = useState<{ id: string; createdAt: string; actorLabel: string | null; action: string; detail: string | null }[]>([]);
+  const [logs, setLogs] = useState<
+    { id: string; createdAt: string; actorLabel: string | null; action: string; detail: string | null }[]
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -141,35 +139,55 @@ export default function OrganizerPage() {
     await loadAll();
   }
 
-  async function setVoteState(category: "KING" | "QUEEN", state: string) {
+  async function groupAction(
+    groupId: string,
+    action: "approve" | "reject" | "withdraw" | "set_order",
+    performanceOrder?: number,
+  ) {
     setError(null);
     setMessage(null);
-    let resolveTieWinnerId: string | undefined;
-    if (state === "REVEALED") {
-      const tie = category === "KING" ? voting?.ties.KING : voting?.ties.QUEEN;
-      // Pre-check by attempting; server enforces ties
-      if (tie && tie.length > 1) {
-        resolveTieWinnerId =
-          prompt(
-            `Tie between: ${tie.map((t) => t.fullName).join(", ")}. Enter nominee id to resolve:`,
-          ) || undefined;
-        if (!resolveTieWinnerId) {
-          setError("Reveal cancelled — tie must be resolved.");
-          return;
-        }
+    const res = await fetch("/api/organizer/groups", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        groupId,
+        action,
+        performanceOrder,
+        rejectionNote: action === "reject" ? "Rejected by organizer" : undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || "Group action failed.");
+      return;
+    }
+    setMessage(`Group ${action} saved.`);
+    await loadAll();
+  }
+
+  async function setVoteState(state: string) {
+    setError(null);
+    setMessage(null);
+    let resolveTieGroupId: string | undefined;
+    if (state === "REVEALED" && voting?.ties && voting.ties.length > 1) {
+      resolveTieGroupId =
+        prompt(
+          `Audience Choice tie between: ${voting.ties.map((t) => t.groupName).join(", ")}. Enter group id:`,
+        ) || undefined;
+      if (!resolveTieGroupId) {
+        setError("Reveal cancelled — tie must be resolved.");
+        return;
       }
     }
     const res = await fetch("/api/organizer/voting", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category, state, resolveTieWinnerId }),
+      body: JSON.stringify({ state, resolveTieGroupId }),
     });
     const data = await res.json();
     if (!res.ok) {
       if (data.tied) {
-        const winner = prompt(
-          `Tie nominees: ${data.tied.join(", ")}. Paste winner nominee id:`,
-        );
+        const winner = prompt(`Tied group ids: ${data.tied.join(", ")}. Paste winner group id:`);
         if (!winner) {
           setError(data.error);
           return;
@@ -177,7 +195,7 @@ export default function OrganizerPage() {
         const retry = await fetch("/api/organizer/voting", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ category, state, resolveTieWinnerId: winner }),
+          body: JSON.stringify({ state, resolveTieGroupId: winner }),
         });
         const retryData = await retry.json();
         if (!retry.ok) {
@@ -189,7 +207,7 @@ export default function OrganizerPage() {
         return;
       }
     }
-    setMessage(`${category} voting → ${state}`);
+    setMessage(`Audience Choice voting → ${state}`);
     await loadAll();
   }
 
@@ -205,7 +223,6 @@ export default function OrganizerPage() {
         capacity: Number(form.get("capacity")),
         registrationOpen: form.get("registrationOpen") === "on",
         requireApproval: form.get("requireApproval") === "on",
-        allowSelfVote: form.get("allowSelfVote") === "on",
       }),
     });
     if (!res.ok) {
@@ -254,8 +271,8 @@ export default function OrganizerPage() {
             </button>
           </form>
         </div>
-      <SiteFooter />
-    </div>
+        <SiteFooter />
+      </div>
     );
   }
 
@@ -280,8 +297,8 @@ export default function OrganizerPage() {
           {[
             ["Registered", dash?.counts.registered],
             ["Checked in", dash?.counts.checkedIn],
-            ["Pending", dash?.counts.pending],
-            ["Votes", dash?.counts.votes],
+            ["Groups pending", dash?.counts.groupsPending],
+            ["Audience votes", dash?.counts.votes],
           ].map(([label, value]) => (
             <div key={String(label)} className="panel p-4">
               <p className="text-sm text-[var(--red)]">{label}</p>
@@ -291,23 +308,15 @@ export default function OrganizerPage() {
         </section>
 
         <section className="panel p-5">
-          <h2 className="brand-mark text-2xl">Event config</h2>
+          <h2 className="brand-mark text-2xl text-[var(--red)]">Event config</h2>
           <form onSubmit={saveConfig} className="mt-4 grid gap-3 md:grid-cols-2">
             <div>
               <label className="label">Date label</label>
-              <input
-                className="field"
-                name="dateLabel"
-                defaultValue={dash?.event.dateLabel}
-              />
+              <input className="field" name="dateLabel" defaultValue={dash?.event.dateLabel} />
             </div>
             <div>
               <label className="label">Venue label</label>
-              <input
-                className="field"
-                name="venueLabel"
-                defaultValue={dash?.event.venueLabel}
-              />
+              <input className="field" name="venueLabel" defaultValue={dash?.event.venueLabel} />
             </div>
             <div>
               <label className="label">Capacity</label>
@@ -335,14 +344,6 @@ export default function OrganizerPage() {
                 />
                 Require approval before ticket issue
               </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  name="allowSelfVote"
-                  defaultChecked={dash?.event.allowSelfVote}
-                />
-                Allow self-voting
-              </label>
             </div>
             <button className="btn btn-primary md:col-span-2" type="submit">
               Save config
@@ -352,13 +353,13 @@ export default function OrganizerPage() {
 
         <section className="panel p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="brand-mark text-2xl">Attendees</h2>
+            <h2 className="brand-mark text-2xl text-[var(--red)]">Attendees</h2>
             <div className="flex gap-2">
               <a className="btn btn-secondary" href="/api/organizer/export?type=attendees">
                 CSV
               </a>
-              <a className="btn btn-secondary" href="/api/organizer/export?type=competitions">
-                Competition CSV
+              <a className="btn btn-secondary" href="/api/organizer/export?type=groups">
+                Groups CSV
               </a>
               <a className="btn btn-secondary" href="/api/organizer/export?type=audit">
                 Audit CSV
@@ -380,7 +381,7 @@ export default function OrganizerPage() {
             {attendees.map((a) => (
               <div
                 key={a.id}
-                className="flex flex-col gap-2 rounded-xl border border-white/10 p-3 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-2 rounded-xl border border-[var(--red)]/10 p-3 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
                   <p className="font-semibold">{a.fullName}</p>
@@ -423,68 +424,128 @@ export default function OrganizerPage() {
         </section>
 
         <section className="panel p-5">
-          <h2 className="brand-mark text-2xl">Competition rosters</h2>
-          <div className="mt-4 space-y-2">
-            {dash?.competitions.map((c) => (
-              <div key={c.id} className="rounded-xl border border-white/10 p-3">
-                <p className="font-semibold">
-                  {c.name}{" "}
-                  <span className="text-sm font-normal text-[var(--ink-soft)]">
-                    ({c.type}) {c.entryCount}
-                    {c.maxEntries != null ? `/${c.maxEntries}` : ""}
-                  </span>
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel p-5">
-          <h2 className="brand-mark text-2xl">Voting controls</h2>
+          <h2 className="brand-mark text-2xl text-[var(--red)]">
+            Christmas Group Talent Show
+          </h2>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
-            Votes cast — King: {voting?.voteCounts.KING ?? 0}, Queen:{" "}
-            {voting?.voteCounts.QUEEN ?? 0}. Totals hidden until reveal.
+            Approve groups and set performance order. Approved groups become Audience
+            Choice candidates.
           </p>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            {(["KING", "QUEEN"] as const).map((cat) => (
-              <div key={cat} className="rounded-xl border border-white/10 p-4">
-                <p className="font-semibold">
-                  {cat} · {cat === "KING" ? voting?.kingVotingState : voting?.queenVotingState}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {["CLOSED", "OPEN", "REVEALED"].map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      className="btn btn-secondary !min-h-10 !px-3 !text-sm"
-                      onClick={() => setVoteState(cat, s)}
-                    >
-                      {s}
-                    </button>
-                  ))}
+          <div className="mt-4 space-y-3">
+            {(dash?.groups || []).map((g) => (
+              <div
+                key={g.id}
+                className="rounded-xl border border-[var(--red)]/10 p-3"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-extrabold text-[var(--ink)]">
+                      {g.groupName}{" "}
+                      <span className="text-sm font-normal text-[var(--ink-soft)]">
+                        · {g.status}
+                        {g.performanceOrder != null ? ` · #${g.performanceOrder}` : ""}
+                      </span>
+                    </p>
+                    <p className="text-sm">{g.performanceTitle}</p>
+                    <p className="text-xs text-[var(--ink-soft)]">
+                      {g.talentType} · leader {g.leaderName} · {g.memberCount} members
+                    </p>
+                    <p className="mt-1 font-mono text-[0.65rem] text-[var(--ink-soft)]">
+                      {g.id}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {g.status !== "APPROVED" && (
+                      <button
+                        type="button"
+                        className="btn btn-primary !min-h-10 !px-3 !text-sm"
+                        onClick={() => groupAction(g.id, "approve")}
+                      >
+                        Approve
+                      </button>
+                    )}
+                    {g.status === "PENDING" && (
+                      <button
+                        type="button"
+                        className="btn btn-danger !min-h-10 !px-3 !text-sm"
+                        onClick={() => groupAction(g.id, "reject")}
+                      >
+                        Reject
+                      </button>
+                    )}
+                    {g.status === "APPROVED" && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                        onClick={() => {
+                          const order = Number(
+                            prompt("Performance order number?", String(g.performanceOrder || 1)),
+                          );
+                          if (!Number.isFinite(order) || order < 1) return;
+                          groupAction(g.id, "set_order", order);
+                        }}
+                      >
+                        Set order
+                      </button>
+                    )}
+                  </div>
                 </div>
-                {voting?.results?.[cat] && (
-                  <ul className="mt-3 space-y-1 text-sm">
-                    {voting.results[cat]!.map((r) => (
-                      <li key={r.nomineeId}>
-                        {r.fullName}: {r.votes}
-                        <span className="ml-2 font-mono text-xs text-[var(--ink-soft)]">
-                          {r.nomineeId}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
               </div>
             ))}
+            {(dash?.groups || []).length === 0 && (
+              <p className="text-[var(--ink-soft)]">No groups registered yet.</p>
+            )}
           </div>
         </section>
 
         <section className="panel p-5">
-          <h2 className="brand-mark text-2xl">Audit log</h2>
+          <h2 className="brand-mark text-2xl text-[var(--red)]">Audience Choice</h2>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
+            Votes cast: {voting?.voteCount ?? 0}. Totals hidden until reveal.
+            {voting?.note ? ` ${voting.note}` : ""}
+          </p>
+          {typeof voting?.legacyKingQueenVoteCount === "number" &&
+            voting.legacyKingQueenVoteCount > 0 && (
+              <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                Archived King/Queen history rows retained: {voting.legacyKingQueenVoteCount}{" "}
+                (read-only; not used for Audience Choice).
+              </p>
+            )}
+          <p className="mt-2 text-sm font-semibold">
+            State: {voting?.talentVotingState || dash?.event.talentVotingState || "—"}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {["CLOSED", "OPEN", "REVEALED"].map((s) => (
+              <button
+                key={s}
+                type="button"
+                className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                onClick={() => setVoteState(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          {voting?.results && (
+            <ul className="mt-4 space-y-1 text-sm">
+              <li className="font-extrabold text-[var(--green)]">Audience Choice results</li>
+              {voting.results.map((r) => (
+                <li key={r.groupId}>
+                  {r.groupName}: {r.votes}
+                  <span className="ml-2 font-mono text-xs text-[var(--ink-soft)]">
+                    {r.groupId}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="panel p-5">
+          <h2 className="brand-mark text-2xl text-[var(--red)]">Audit log</h2>
           <div className="mt-4 max-h-80 space-y-2 overflow-auto text-sm">
             {logs.map((l) => (
-              <div key={l.id} className="border-b border-white/5 py-2">
+              <div key={l.id} className="border-b border-[var(--red)]/5 py-2">
                 <p>
                   <span className="text-[var(--red)]">
                     {new Date(l.createdAt).toLocaleString()}
@@ -497,7 +558,7 @@ export default function OrganizerPage() {
           </div>
         </section>
       </div>
-    <SiteFooter />
+      <SiteFooter />
     </div>
   );
 }

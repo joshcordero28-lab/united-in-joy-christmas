@@ -13,20 +13,32 @@ export async function GET() {
     }
 
     const event = await getEventConfig();
-    const [registered, issued, pending, revoked, checkedIn, competitionCount, voteCount] =
-      await Promise.all([
-        prisma.attendee.count(),
-        prisma.attendee.count({ where: { status: "ISSUED" } }),
-        prisma.attendee.count({ where: { status: "PENDING" } }),
-        prisma.attendee.count({ where: { status: "REVOKED" } }),
-        prisma.attendee.count({ where: { checkedInAt: { not: null } } }),
-        prisma.competitionEntry.count(),
-        prisma.vote.count(),
-      ]);
+    const [
+      registered,
+      issued,
+      pending,
+      revoked,
+      checkedIn,
+      groupsPending,
+      groupsApproved,
+      voteCount,
+    ] = await Promise.all([
+      prisma.attendee.count(),
+      prisma.attendee.count({ where: { status: "ISSUED" } }),
+      prisma.attendee.count({ where: { status: "PENDING" } }),
+      prisma.attendee.count({ where: { status: "REVOKED" } }),
+      prisma.attendee.count({ where: { checkedInAt: { not: null } } }),
+      prisma.talentGroup.count({ where: { status: "PENDING" } }),
+      prisma.talentGroup.count({ where: { status: "APPROVED" } }),
+      prisma.audienceVote.count(),
+    ]);
 
-    const competitions = await prisma.competition.findMany({
-      orderBy: { sortOrder: "asc" },
-      include: { _count: { select: { entries: true } } },
+    const groups = await prisma.talentGroup.findMany({
+      orderBy: [{ performanceOrder: "asc" }, { createdAt: "asc" }],
+      include: {
+        _count: { select: { members: true } },
+        leader: { select: { fullName: true } },
+      },
     });
 
     return NextResponse.json({
@@ -37,17 +49,20 @@ export async function GET() {
         pending,
         revoked,
         checkedIn,
-        competitionEntries: competitionCount,
+        groupsPending,
+        groupsApproved,
         votes: voteCount,
         capacity: event.capacity,
       },
-      competitions: competitions.map((c) => ({
-        id: c.id,
-        name: c.name,
-        type: c.type,
-        entryCount: c._count.entries,
-        maxEntries: c.maxEntries,
-        isOpen: c.isOpen,
+      groups: groups.map((g) => ({
+        id: g.id,
+        groupName: g.groupName,
+        performanceTitle: g.performanceTitle,
+        talentType: g.talentType,
+        status: g.status,
+        performanceOrder: g.performanceOrder,
+        memberCount: g._count.members,
+        leaderName: g.leader.fullName,
       })),
       staff: {
         displayName: session.displayName,

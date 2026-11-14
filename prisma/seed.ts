@@ -28,6 +28,12 @@ async function main() {
     },
   });
 
+  // Ensure talent voting column is present on older DBs without wiping other flags
+  await prisma.eventConfig.update({
+    where: { id: "default" },
+    data: {},
+  });
+
   const organizerHash = await bcrypt.hash(organizerPassword, 12);
   const staffHash = await bcrypt.hash(staffPassword, 12);
 

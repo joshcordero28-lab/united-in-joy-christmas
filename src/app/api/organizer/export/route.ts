@@ -57,19 +57,25 @@ export async function GET(request: Request) {
       });
     }
 
-    if (type === "competitions") {
-      const rows = await prisma.competitionEntry.findMany({
-        include: { competition: true, attendee: true },
-        orderBy: { createdAt: "asc" },
+    if (type === "groups" || type === "competitions") {
+      const rows = await prisma.talentGroup.findMany({
+        include: {
+          leader: true,
+          members: { include: { attendee: true } },
+        },
+        orderBy: [{ performanceOrder: "asc" }, { createdAt: "asc" }],
       });
       const lines = [
-        "competition,type,attendee,teamName,enteredAt",
+        "groupName,performanceTitle,talentType,status,performanceOrder,leader,members,createdAt",
         ...rows.map((r) =>
           [
-            r.competition.name,
-            r.competition.type,
-            r.attendee.fullName,
-            r.teamName || "",
+            r.groupName,
+            r.performanceTitle,
+            r.talentType,
+            r.status,
+            r.performanceOrder ?? "",
+            r.leader.fullName,
+            r.members.map((m) => m.attendee.fullName).join("; "),
             r.createdAt.toISOString(),
           ]
             .map(csvEscape)
@@ -79,7 +85,7 @@ export async function GET(request: Request) {
       return new NextResponse(lines.join("\n"), {
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": 'attachment; filename="competitions.csv"',
+          "Content-Disposition": 'attachment; filename="talent-groups.csv"',
         },
       });
     }
