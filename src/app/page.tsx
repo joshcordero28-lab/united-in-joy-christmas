@@ -33,9 +33,12 @@ export default async function HomePage() {
           <p className="script-mark animate-rise-delay mt-1 text-3xl text-[var(--gold-bright)] sm:text-4xl">
             Christmas 2026
           </p>
-          <p className="animate-rise-delay mt-5 max-w-xl text-lg text-[var(--cream)]/90 sm:text-xl">
-            Get your QR ticket and join the Christmas Group Talent Show — a festive
-            group performance competition.
+          <p className="animate-rise-delay mt-4 max-w-xl text-2xl font-extrabold tracking-wide text-[var(--gold-bright)] sm:text-3xl">
+            Win Exciting PRIZES!
+          </p>
+          <p className="animate-rise-delay mt-3 max-w-xl text-lg text-[var(--cream)]/90 sm:text-xl">
+            A gathering of thanksgiving and celebration — get your QR ticket and join
+            the Christmas Group Talent Show.
           </p>
           <div className="animate-rise-delay mt-8 flex flex-col gap-3 sm:flex-row">
             <Link href="/register" className="btn btn-primary cta-pulse">
@@ -53,11 +56,12 @@ export default async function HomePage() {
 
       <section className="relative w-full overflow-hidden bg-[var(--cream)]">
         <Image
-          src="/brand/united-in-joy-banner.jpg"
-          alt="United in Joy Christmas 2026 — official event artwork"
-          width={1400}
-          height={780}
+          src="/brand/united-in-joy-banner-prizes.jpg"
+          alt="United in Joy Christmas 2026 — Win Exciting PRIZES! A gathering of thanksgiving and celebration"
+          width={1350}
+          height={1080}
           className="mx-auto h-auto w-full max-w-5xl object-cover"
+          priority
         />
       </section>
 
