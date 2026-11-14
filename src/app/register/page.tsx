@@ -52,7 +52,10 @@ export default function RegisterPage() {
   }
 
   function addExtra() {
-    if (extraNames.length >= 19) return;
+    // Server max is 8 attendees total (including the primary when attending).
+    const selfSlot = includeSelf ? 1 : 0;
+    if (selfSlot + extraNames.filter((n) => n.trim()).length >= 8) return;
+    if (extraNames.length >= 8) return;
     setExtraNames((prev) => [...prev, ""]);
   }
 

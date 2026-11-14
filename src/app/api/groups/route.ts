@@ -21,9 +21,10 @@ const registerSchema = z.object({
   partnerTickets: z.array(z.string().min(1).max(500)).max(MAX_MEMBERS - 1).default([]),
   /**
    * Partners selected from the leader’s registration party (same RegistrationParty).
-   * Server re-checks party membership — client cannot invent ids from other parties.
+   * Requires matching managerToken — ticket alone cannot list or enroll party mates by id.
    */
   partnerAttendeeIds: z.array(z.string().min(1).max(64)).max(MAX_MEMBERS - 1).default([]),
+  managerToken: z.string().min(16).max(200).optional(),
 });
 
 export async function GET(request: Request) {
@@ -113,6 +114,15 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    if (partnerAttendeeIds.length > 0 && !parsed.data.managerToken) {
+      return NextResponse.json(
+        {
+          error:
+            "Selecting partners from your registration requires the private management link.",
+        },
+        { status: 401 },
+      );
+    }
 
     if (partnerTokens.length + partnerAttendeeIds.length > MAX_MEMBERS - 1) {
       return NextResponse.json(
@@ -196,23 +206,34 @@ export async function POST(request: Request) {
         }
       }
 
-      const partnersFromParty =
-        partnerAttendeeIds.length === 0
-          ? []
-          : await tx.attendee.findMany({
-              where: {
-                id: { in: partnerAttendeeIds },
-                registrationPartyId: leader.registrationPartyId,
-              },
-              select: { id: true, fullName: true, status: true },
-            });
-
-      if (partnersFromParty.length !== partnerAttendeeIds.length) {
-        return {
-          status: 400 as const,
-          error:
-            "Party partners must belong to the leader’s registration. Verify each person with their own ticket instead.",
-        };
+      let partnersFromParty: { id: string; fullName: string; status: TicketStatus }[] = [];
+      if (partnerAttendeeIds.length > 0) {
+        const managerToken = parsed.data.managerToken!;
+        const party = await tx.registrationParty.findUnique({
+          where: { managerToken },
+          select: { id: true },
+        });
+        if (!party || party.id !== leader.registrationPartyId) {
+          return {
+            status: 401 as const,
+            error:
+              "Management credential does not match this leader’s registration. Verify partners with their tickets instead.",
+          };
+        }
+        partnersFromParty = await tx.attendee.findMany({
+          where: {
+            id: { in: partnerAttendeeIds },
+            registrationPartyId: leader.registrationPartyId,
+          },
+          select: { id: true, fullName: true, status: true },
+        });
+        if (partnersFromParty.length !== partnerAttendeeIds.length) {
+          return {
+            status: 400 as const,
+            error:
+              "Party partners must belong to the leader’s registration. Verify each person with their own ticket instead.",
+          };
+        }
       }
       for (const p of partnersFromParty) {
         if (p.status !== TicketStatus.ISSUED) {

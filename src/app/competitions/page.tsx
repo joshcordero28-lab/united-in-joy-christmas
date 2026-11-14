@@ -27,6 +27,7 @@ export default function TalentShowRegisterPage() {
   const [leaderTicket, setLeaderTicket] = useState("");
   const [leader, setLeader] = useState<VerifiedAttendee | null>(null);
   const [partyAttendees, setPartyAttendees] = useState<{ id: string; fullName: string }[]>([]);
+  const [managerToken, setManagerToken] = useState("");
   const [selectedPartyIds, setSelectedPartyIds] = useState<string[]>([]);
   const [ticketPartners, setTicketPartners] = useState<Partner[]>([]);
   const [groupName, setGroupName] = useState("");
@@ -39,7 +40,35 @@ export default function TalentShowRegisterPage() {
 
   useEffect(() => {
     setSavedTicket(localStorage.getItem("uilc_ticket_token") || "");
+    setManagerToken(localStorage.getItem("uilc_manager_token") || "");
   }, []);
+
+  async function loadPartyMates(leaderId: string) {
+    const token = localStorage.getItem("uilc_manager_token") || "";
+    setManagerToken(token);
+    if (!token) {
+      setPartyAttendees([]);
+      return;
+    }
+    try {
+      const res = await fetch("/api/manage/view", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ managerToken: token }),
+      });
+      if (!res.ok) {
+        setPartyAttendees([]);
+        return;
+      }
+      const data = await res.json();
+      const mates = ((data.attendees as { id: string; fullName: string; status: string }[]) || [])
+        .filter((a) => a.id !== leaderId && a.status === "ISSUED")
+        .map((a) => ({ id: a.id, fullName: a.fullName }));
+      setPartyAttendees(mates);
+    } catch {
+      setPartyAttendees([]);
+    }
+  }
 
   const partnerCount = selectedPartyIds.length + ticketPartners.length;
   const slotsLeft = MAX_PARTNERS - partnerCount;
@@ -88,6 +117,7 @@ export default function TalentShowRegisterPage() {
           talentType,
           leaderTicket,
           partnerAttendeeIds: selectedPartyIds,
+          managerToken: selectedPartyIds.length > 0 ? managerToken || undefined : undefined,
           partnerTickets: ticketPartners
             .filter((p): p is Extract<Partner, { source: "ticket" }> => p.source === "ticket")
             .map((p) => p.ticket),
@@ -140,17 +170,16 @@ export default function TalentShowRegisterPage() {
             <TicketVerifyPanel
               title="Leader ticket"
               hint="Camera scan · QR image upload · or private ticket code"
-              includeParty
               initialTicket={savedTicket}
               verifiedLabel={leader?.fullName || null}
-              onVerified={({ ticket, attendee, partyAttendees: mates }) => {
+              onVerified={async ({ ticket, attendee }) => {
                 setLeaderTicket(ticket);
                 setLeader(attendee);
-                setPartyAttendees(mates);
                 setSelectedPartyIds([]);
                 setTicketPartners([]);
                 setError(null);
                 localStorage.setItem("uilc_ticket_token", ticket);
+                await loadPartyMates(attendee.id);
               }}
               onClear={clearLeader}
             />

@@ -65,6 +65,7 @@ async function main() {
         OR: [
           { id: { startsWith: "register:" } },
           { id: { startsWith: "register-day:" } },
+          { id: { startsWith: "register-seats:" } },
           { id: { startsWith: "group-register:" } },
           { id: { startsWith: "ticket-verify:" } },
           { id: { startsWith: "from-ticket:" } },
@@ -170,6 +171,12 @@ async function main() {
   assert(verifyJ.attendee && (verifyJ.attendee as { id: string }).id === idA, "verify returns attendee");
   assert(!("ticketToken" in (verifyJ.attendee as object)), "verify must not echo ticketToken");
   assert(!("phone" in (verifyJ.attendee as object)), "verify must not return phone");
+  assert(
+    !("partyAttendees" in verifyJ) ||
+      !Array.isArray(verifyJ.partyAttendees) ||
+      (verifyJ.partyAttendees as unknown[]).length === 0,
+    "Ticket verify must not list other party members",
+  );
   {
     const { PrismaClient } = await import("@prisma/client");
     const prisma = new PrismaClient();
@@ -299,6 +306,7 @@ async function main() {
   });
   const leadTok = String((partyTalent.attendees as { ticketToken: string }[])[0].ticketToken);
   const mateId = String((partyTalent.attendees as { id: string }[])[1].id);
+  const partyMgr = String(partyTalent.managerToken);
 
   const { res: gDupIds } = await req("/api/groups", {
     method: "POST",
@@ -308,10 +316,23 @@ async function main() {
       performanceTitle: "Dup",
       talentType: "Dance",
       partnerAttendeeIds: [mateId, mateId],
+      managerToken: partyMgr,
     }),
   });
   assert(gDupIds.status === 400, "Duplicate partner attendee ids rejected");
   pass("Duplicate members within one entry rejected");
+
+  const { res: gNoMgr } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      leaderTicket: leadTok,
+      groupName: `No Mgr ${stamp}`,
+      performanceTitle: "Nope",
+      talentType: "Dance",
+      partnerAttendeeIds: [mateId],
+    }),
+  });
+  assert(gNoMgr.status === 401, "Party partner ids require manager token");
 
   const { res: gParty, json: gPartyJ } = await req("/api/groups", {
     method: "POST",
@@ -321,6 +342,7 @@ async function main() {
       performanceTitle: "Together",
       talentType: "Mixed / Variety",
       partnerAttendeeIds: [mateId],
+      managerToken: partyMgr,
       partnerTickets: [],
     }),
   });
@@ -337,9 +359,10 @@ async function main() {
       performanceTitle: "Nope",
       talentType: "Dance",
       partnerAttendeeIds: [idB],
+      managerToken: partyMgr,
     }),
   });
-  assert(gHijack.status === 400 || gHijack.status === 409, "Cannot add attendees from another registration by id");
+  assert(gHijack.status === 400 || gHijack.status === 401 || gHijack.status === 409, "Cannot add attendees from another registration by id");
   pass("Direct API bypass with foreign attendee ids rejected");
 
   // Revoked ticket cannot verify / lead
@@ -730,7 +753,11 @@ async function main() {
     const prisma = new PrismaClient();
     await prisma.rateLimitBucket.deleteMany({
       where: {
-        OR: [{ id: { startsWith: "register:" } }, { id: { startsWith: "register-day:" } }],
+        OR: [
+          { id: { startsWith: "register:" } },
+          { id: { startsWith: "register-day:" } },
+          { id: { startsWith: "register-seats:" } },
+        ],
       },
     });
     await prisma.$disconnect();

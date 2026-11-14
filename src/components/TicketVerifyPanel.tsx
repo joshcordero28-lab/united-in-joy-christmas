@@ -12,7 +12,6 @@ export type VerifiedAttendee = {
 type VerifyResponse = {
   ok?: boolean;
   attendee?: VerifiedAttendee;
-  partyAttendees?: { id: string; fullName: string }[];
   error?: string;
   code?: string;
   registerUrl?: string;
@@ -21,13 +20,8 @@ type VerifyResponse = {
 type Props = {
   title: string;
   hint?: string;
-  includeParty?: boolean;
   initialTicket?: string;
-  onVerified: (data: {
-    ticket: string;
-    attendee: VerifiedAttendee;
-    partyAttendees: { id: string; fullName: string }[];
-  }) => void;
+  onVerified: (data: { ticket: string; attendee: VerifiedAttendee }) => void;
   onClear?: () => void;
   verifiedLabel?: string | null;
 };
@@ -35,7 +29,6 @@ type Props = {
 export function TicketVerifyPanel({
   title,
   hint,
-  includeParty = false,
   initialTicket = "",
   onVerified,
   onClear,
@@ -67,7 +60,7 @@ export function TicketVerifyPanel({
       const res = await fetch("/api/tickets/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket: raw, includeParty }),
+        body: JSON.stringify({ ticket: raw }),
       });
       const data = (await res.json()) as VerifyResponse;
       if (!res.ok || !data.attendee) {
@@ -78,7 +71,6 @@ export function TicketVerifyPanel({
       onVerified({
         ticket: raw,
         attendee: data.attendee,
-        partyAttendees: data.partyAttendees || [],
       });
     } catch {
       setError("Network error during verification.");

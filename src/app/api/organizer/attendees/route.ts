@@ -4,6 +4,18 @@ import { getStaffSession, requireStaff } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
 import { attendeeIsEligible } from "@/lib/vote-entitlements";
 
+function maskContact(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const v = value.trim();
+  if (v.includes("@")) {
+    const [user, domain] = v.split("@");
+    if (!domain) return "***";
+    return `${user.slice(0, 1)}***@${domain}`;
+  }
+  if (v.length <= 4) return "***";
+  return `${"*".repeat(Math.max(v.length - 4, 2))}${v.slice(-4)}`;
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getStaffSession();
@@ -12,6 +24,7 @@ export async function GET(request: Request) {
     } catch {
       return NextResponse.json({ error: "Staff login required." }, { status: 401 });
     }
+    const isOrganizer = session.role === "ORGANIZER";
 
     const { searchParams } = new URL(request.url);
     const q = (searchParams.get("q") || "").trim();
@@ -126,8 +139,8 @@ export async function GET(request: Request) {
         return {
           id: a.id,
           fullName: a.fullName,
-          phone: a.phone,
-          email: a.email,
+          phone: isOrganizer ? a.phone : maskContact(a.phone),
+          email: isOrganizer ? a.email : maskContact(a.email),
           status: a.status,
           registeredAt: a.registeredAt,
           issuedAt: a.issuedAt,
@@ -135,8 +148,12 @@ export async function GET(request: Request) {
           checkInMethod: a.checkInMethod,
           partyId: a.registrationPartyId,
           managerName: a.registrationParty.managerName,
-          managerPhone: a.registrationParty.contactPhone,
-          managerEmail: a.registrationParty.contactEmail,
+          managerPhone: isOrganizer
+            ? a.registrationParty.contactPhone
+            : maskContact(a.registrationParty.contactPhone),
+          managerEmail: isOrganizer
+            ? a.registrationParty.contactEmail
+            : maskContact(a.registrationParty.contactEmail),
           partyEligible: stats?.eligible ?? 0,
           partyUsed: stats?.used ?? 0,
           partyRemaining: stats?.remaining ?? 0,

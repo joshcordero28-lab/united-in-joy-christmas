@@ -7,9 +7,12 @@ import {
   generateVotingCredential,
   hashVotingCredential,
 } from "@/lib/crypto";
-import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { clientIp, rateLimit, rateLimitConsume } from "@/lib/rate-limit";
 import { writeAudit } from "@/lib/audit";
 import { TicketStatus } from "@prisma/client";
+
+/** Hard cap per registration submission (also enforced in UI). */
+const MAX_ATTENDEES_PER_REGISTRATION = 8;
 
 const attendeeSchema = z.object({
   fullName: z.string().trim().min(2).max(80),
@@ -27,7 +30,7 @@ const schema = z.object({
    * Ticket holders only. Manager is an attendee only when listed here.
    * Omit for legacy solo registration (manager = sole attendee).
    */
-  attendees: z.array(attendeeSchema).min(1).max(20).optional(),
+  attendees: z.array(attendeeSchema).min(1).max(MAX_ATTENDEES_PER_REGISTRATION).optional(),
   /** Honeypot — must stay empty. */
   company: z.string().max(200).optional().or(z.literal("")),
 });
@@ -53,14 +56,14 @@ function resolveNames(data: z.infer<typeof schema>): {
 export async function POST(request: Request) {
   try {
     const ip = clientIp(request);
-    const limited = await rateLimit(`register:${ip}`, 40, 60_000);
+    const limited = await rateLimit(`register:${ip}`, 5, 60_000);
     if (!limited.ok) {
       return NextResponse.json(
         { error: "Too many registration attempts. Please wait and try again." },
         { status: 429, headers: { "Retry-After": String(limited.retryAfterSeconds) } },
       );
     }
-    const daily = await rateLimit(`register-day:${ip}`, 80, 24 * 60 * 60 * 1000);
+    const daily = await rateLimit(`register-day:${ip}`, 12, 24 * 60 * 60 * 1000);
     if (!daily.ok) {
       return NextResponse.json(
         { error: "Daily registration limit reached for this network. Try again tomorrow." },
@@ -96,81 +99,128 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    if (attendeeNames.length > MAX_ATTENDEES_PER_REGISTRATION) {
+      return NextResponse.json(
+        { error: `Maximum ${MAX_ATTENDEES_PER_REGISTRATION} attendees per registration.` },
+        { status: 400 },
+      );
+    }
+
+    // Cap seats created per network per day (separate from request count).
+    const seats = await rateLimitConsume(
+      `register-seats:${ip}`,
+      attendeeNames.length,
+      24,
+      24 * 60 * 60 * 1000,
+    );
+    if (!seats.ok) {
+      return NextResponse.json(
+        {
+          error:
+            "Daily ticket limit reached for this network. Try again tomorrow or register fewer people.",
+        },
+        { status: 429, headers: { "Retry-After": String(seats.retryAfterSeconds) } },
+      );
+    }
 
     const event = await getEventConfig();
     if (!event.registrationOpen) {
       return NextResponse.json({ error: "Registration is closed." }, { status: 403 });
     }
 
-    const issuedCount = await prisma.attendee.count({
-      where: { status: { in: [TicketStatus.ISSUED, TicketStatus.PENDING] } },
-    });
-    if (issuedCount + attendeeNames.length > event.capacity) {
-      return NextResponse.json(
-        {
-          error: `Not enough capacity for ${attendeeNames.length} attendee(s). ${Math.max(0, event.capacity - issuedCount)} spot(s) left.`,
-        },
-        { status: 403 },
-      );
-    }
-
     const status = event.requireApproval ? TicketStatus.PENDING : TicketStatus.ISSUED;
     const managerToken = generateOpaqueToken(32);
 
-    const created = await prisma.$transaction(async (tx) => {
-      const party = await tx.registrationParty.create({
-        data: {
-          managerName,
-          contactPhone: parsed.data.phone || null,
-          contactEmail: parsed.data.email || null,
-          notes: parsed.data.notes || null,
-          managerToken,
-        },
-      });
-
-      const attendeeRows: {
+    let created: {
+      party: { id: string; managerName: string };
+      attendeeRows: {
         id: string;
         fullName: string;
         status: TicketStatus;
         ticketToken: string | null;
         votingCredential: string | null;
-      }[] = [];
+      }[];
+    };
 
-      for (let i = 0; i < attendeeNames.length; i++) {
-        const fullName = attendeeNames[i];
-        const ticketToken = generateOpaqueToken(32);
-        const votingCredential = generateVotingCredential();
-        const votingCredentialHash = await hashVotingCredential(votingCredential);
-        const copyContact =
-          fullName.toLowerCase() === managerName.toLowerCase() &&
-          !attendeeRows.some((r) => r.fullName.toLowerCase() === managerName.toLowerCase());
+    try {
+      created = await prisma.$transaction(async (tx) => {
+        // Serialize capacity checks against concurrent registrations.
+        await tx.$executeRaw`SELECT id FROM "EventConfig" WHERE id = 'default' FOR UPDATE`;
+        const cfg = await tx.eventConfig.findUnique({ where: { id: "default" } });
+        const capacity = cfg?.capacity ?? event.capacity;
+        const issuedCount = await tx.attendee.count({
+          where: { status: { in: [TicketStatus.ISSUED, TicketStatus.PENDING] } },
+        });
+        if (issuedCount + attendeeNames.length > capacity) {
+          throw Object.assign(
+            new Error(
+              `Not enough capacity for ${attendeeNames.length} attendee(s). ${Math.max(0, capacity - issuedCount)} spot(s) left.`,
+            ),
+            { status: 403 },
+          );
+        }
 
-        const attendee = await tx.attendee.create({
+        const party = await tx.registrationParty.create({
           data: {
-            fullName,
-            phone: copyContact ? parsed.data.phone || null : null,
-            email: copyContact ? parsed.data.email || null : null,
-            notes: null,
-            ticketToken,
-            votingCredentialHash,
-            votingCredentialHint: null,
-            status,
-            issuedAt: status === TicketStatus.ISSUED ? new Date() : null,
-            registrationPartyId: party.id,
+            managerName,
+            contactPhone: parsed.data.phone || null,
+            contactEmail: parsed.data.email || null,
+            notes: parsed.data.notes || null,
+            managerToken,
           },
         });
 
-        attendeeRows.push({
-          id: attendee.id,
-          fullName: attendee.fullName,
-          status: attendee.status,
-          ticketToken: status === TicketStatus.ISSUED ? ticketToken : null,
-          votingCredential: status === TicketStatus.ISSUED ? votingCredential : null,
-        });
-      }
+        const attendeeRows: {
+          id: string;
+          fullName: string;
+          status: TicketStatus;
+          ticketToken: string | null;
+          votingCredential: string | null;
+        }[] = [];
 
-      return { party, attendeeRows };
-    });
+        for (let i = 0; i < attendeeNames.length; i++) {
+          const fullName = attendeeNames[i];
+          const ticketToken = generateOpaqueToken(32);
+          const votingCredential = generateVotingCredential();
+          const votingCredentialHash = await hashVotingCredential(votingCredential);
+          const copyContact =
+            fullName.toLowerCase() === managerName.toLowerCase() &&
+            !attendeeRows.some((r) => r.fullName.toLowerCase() === managerName.toLowerCase());
+
+          const attendee = await tx.attendee.create({
+            data: {
+              fullName,
+              phone: copyContact ? parsed.data.phone || null : null,
+              email: copyContact ? parsed.data.email || null : null,
+              notes: null,
+              ticketToken,
+              votingCredentialHash,
+              votingCredentialHint: null,
+              status,
+              issuedAt: status === TicketStatus.ISSUED ? new Date() : null,
+              registrationPartyId: party.id,
+            },
+          });
+
+          attendeeRows.push({
+            id: attendee.id,
+            fullName: attendee.fullName,
+            status: attendee.status,
+            ticketToken: status === TicketStatus.ISSUED ? ticketToken : null,
+            votingCredential: status === TicketStatus.ISSUED ? votingCredential : null,
+          });
+        }
+
+        return { party, attendeeRows };
+      });
+    } catch (e: unknown) {
+      const statusCode =
+        typeof e === "object" && e && "status" in e ? Number((e as { status: number }).status) : 0;
+      if (statusCode === 403 && e instanceof Error) {
+        return NextResponse.json({ error: e.message }, { status: 403 });
+      }
+      throw e;
+    }
 
     await writeAudit({
       actorLabel: "guest",

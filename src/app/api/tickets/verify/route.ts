@@ -5,18 +5,17 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 const schema = z.object({
   ticket: z.string().min(1).max(500),
-  /** When true (leader verification), include other ISSUED attendees on the same registration. */
-  includeParty: z.boolean().optional(),
 });
 
 /**
  * Verify an event ticket for talent-show signup.
- * Does not check the guest in or change voting entitlements.
+ * Does not check the guest in, change voting entitlements, or list other party members.
+ * (Party mates are loaded only via the private management credential.)
  */
 export async function POST(request: Request) {
   try {
     const ip = clientIp(request);
-    const limited = await rateLimit(`ticket-verify:${ip}`, 40, 60_000);
+    const limited = await rateLimit(`ticket-verify:${ip}`, 20, 60_000);
     if (!limited.ok) {
       return NextResponse.json({ error: "Too many verification attempts." }, { status: 429 });
     }
@@ -27,9 +26,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid request." }, { status: 400 });
     }
 
-    const result = await verifyAttendeeTicket(parsed.data.ticket, {
-      includeParty: parsed.data.includeParty === true,
-    });
+    const result = await verifyAttendeeTicket(parsed.data.ticket, { includeParty: false });
 
     if (!result.ok) {
       return NextResponse.json(
@@ -42,11 +39,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Minimum fields only — never ticket tokens, contact, or manager credentials.
     return NextResponse.json({
       ok: true,
       attendee: result.attendee,
-      partyAttendees: parsed.data.includeParty ? result.partyAttendees : [],
     });
   } catch (err) {
     console.error("ticket verify failed", err);
