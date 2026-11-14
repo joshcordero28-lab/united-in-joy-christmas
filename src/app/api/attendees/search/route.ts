@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { getStaffSession, requireStaff } from "@/lib/session";
 
 function maskContact(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -16,13 +17,20 @@ function maskContact(value: string | null | undefined): string | null {
 }
 
 /**
- * Public search of issued attendees for talent-group member picking.
+ * Staff-only search of issued attendees (organizer tooling).
  * Does not expose ticket tokens.
  */
 export async function GET(request: Request) {
   try {
+    const session = await getStaffSession();
+    try {
+      requireStaff(session, ["ORGANIZER", "STAFF"]);
+    } catch {
+      return NextResponse.json({ error: "Staff login required." }, { status: 401 });
+    }
+
     const ip = clientIp(request);
-    const limited = await rateLimit(`attendee-search:${ip}`, 40, 60_000);
+    const limited = await rateLimit(`attendee-search:${session.staffId}:${ip}`, 40, 60_000);
     if (!limited.ok) {
       return NextResponse.json({ error: "Too many searches." }, { status: 429 });
     }
@@ -52,7 +60,6 @@ export async function GET(request: Request) {
       },
     });
 
-    // Exclude people already in a talent group
     const busy = await prisma.talentGroupMember.findMany({
       where: { attendeeId: { in: attendees.map((a) => a.id) } },
       select: { attendeeId: true },

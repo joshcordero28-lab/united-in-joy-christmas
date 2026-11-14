@@ -8,9 +8,8 @@ import { getPublicVotingGate } from "@/lib/voting-public";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 const schema = z.object({
-  ticketToken: z.string().min(16).max(200).optional(),
+  ticketToken: z.string().min(16).max(200),
   votingCredential: z.string().min(4).max(40),
-  attendeeId: z.string().optional(),
 });
 
 export async function POST(request: Request) {
@@ -34,11 +33,9 @@ export async function POST(request: Request) {
 
     const event = await getEventConfig();
 
-    const attendee = parsed.data.ticketToken
-      ? await prisma.attendee.findUnique({ where: { ticketToken: parsed.data.ticketToken } })
-      : parsed.data.attendeeId
-        ? await prisma.attendee.findUnique({ where: { id: parsed.data.attendeeId } })
-        : null;
+    const attendee = await prisma.attendee.findUnique({
+      where: { ticketToken: parsed.data.ticketToken },
+    });
 
     if (!attendee || attendee.status !== "ISSUED") {
       return NextResponse.json({ error: "Invalid ticket." }, { status: 401 });

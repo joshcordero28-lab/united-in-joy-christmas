@@ -141,19 +141,11 @@ async function main() {
   assert(!("ticketToken" in fromTicket), "from-ticket must not return ticket tokens");
   pass("from-ticket resolves leader without exposing token");
 
-  const { json: searchJ } = await req(
+  const { res: searchAnon } = await req(
     `/api/attendees/search?q=${encodeURIComponent(`Blake Talent ${stamp}`)}`,
   );
-  const found = (searchJ.attendees as { id: string; fullName: string; contactHint?: string }[]) || [];
-  assert(
-    found.some((p) => p.id === idB),
-    `Search must find partner Blake: ${JSON.stringify(searchJ)}`,
-  );
-  assert(
-    found.every((p) => !("ticketToken" in p)),
-    "Search results must not include ticket tokens",
-  );
-  pass("Attendee search returns registered guests for member pick");
+  assert(searchAnon.status === 401, "Public attendee search must require staff login");
+  pass("Attendee search is staff-only");
 
   const staffJar: Jar = new Map();
   await req("/api/auth/staff/login", {
@@ -164,6 +156,21 @@ async function main() {
       password: process.env.STAFF_PASSWORD,
     }),
   });
+
+  const { json: searchJ } = await req(
+    `/api/attendees/search?q=${encodeURIComponent(`Blake Talent ${stamp}`)}`,
+    { jar: staffJar },
+  );
+  const found = (searchJ.attendees as { id: string; fullName: string; contactHint?: string }[]) || [];
+  assert(
+    found.some((p) => p.id === idB),
+    `Staff search must find partner Blake: ${JSON.stringify(searchJ)}`,
+  );
+  assert(
+    found.every((p) => !("ticketToken" in p)),
+    "Search results must not include ticket tokens",
+  );
+  pass("Staff attendee search returns registered guests");
   await req("/api/checkin", {
     method: "POST",
     jar: staffJar,

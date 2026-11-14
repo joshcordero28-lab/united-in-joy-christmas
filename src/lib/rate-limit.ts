@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { prisma } from "./db";
 
 type RateLimitResult = { ok: true } | { ok: false; retryAfterSeconds: number };
@@ -37,22 +38,23 @@ export async function rateLimit(
 }
 
 /**
- * Client IP for rate limiting. Do not trust the left-most X-Forwarded-For entry
- * (client-spoofable). Prefer X-Real-IP from the edge, else the right-most
- * forwarded hop (typically appended by the trusted proxy).
+ * Rate-limit identity. Never trust client-controlled X-Real-IP or the left-most
+ * X-Forwarded-For value. Behind Cursor/hosting the edge appends the connecting
+ * IP, so we use only the right-most forwarded hop. If none is present, fall back
+ * to a coarse UA fingerprint (not spoofable as a unique IP).
  */
 export function clientIp(request: Request): string {
-  const realIp = request.headers.get("x-real-ip")?.trim();
-  if (realIp) return realIp;
-
   const xf = request.headers.get("x-forwarded-for");
   if (xf) {
     const parts = xf
       .split(",")
       .map((p) => p.trim())
       .filter(Boolean);
+    // Right-most entry is typically appended by the trusted reverse proxy.
     if (parts.length > 0) return parts[parts.length - 1]!;
   }
 
-  return "unknown";
+  const ua = request.headers.get("user-agent") || "unknown";
+  const digest = createHash("sha256").update(ua).digest("hex").slice(0, 16);
+  return `ua:${digest}`;
 }

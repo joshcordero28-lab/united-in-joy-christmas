@@ -22,22 +22,21 @@ const registerSchema = z.object({
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const status = searchParams.get("status");
   const forVoting = searchParams.get("forVoting") === "true";
 
   if (forVoting) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
+  // Public list is APPROVED only. Status filters / pending groups require staff
+  // (use /api/organizer/groups). Never expose attendee ids on this public route.
   const groups = await prisma.talentGroup.findMany({
-    where: status
-      ? { status: status as "PENDING" | "APPROVED" | "REJECTED" | "WITHDRAWN" }
-      : { status: "APPROVED" },
+    where: { status: "APPROVED" },
     orderBy: [{ performanceOrder: "asc" }, { createdAt: "asc" }],
     include: {
-      leader: { select: { id: true, fullName: true } },
+      leader: { select: { fullName: true } },
       members: {
-        include: { attendee: { select: { id: true, fullName: true } } },
+        include: { attendee: { select: { fullName: true } } },
       },
     },
   });
@@ -50,9 +49,8 @@ export async function GET(request: Request) {
       talentType: g.talentType,
       status: g.status,
       performanceOrder: g.performanceOrder,
-      leader: g.leader,
+      leader: { fullName: g.leader.fullName },
       members: g.members.map((m) => ({
-        id: m.attendee.id,
         fullName: m.attendee.fullName,
       })),
     })),
