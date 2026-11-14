@@ -49,9 +49,8 @@ export default function StaffPage() {
   async function checkIn(value: string, method: "qr" | "manual") {
     setError(null);
     setMessage(null);
-    const payload = value.includes("/ticket/")
-      ? { token: decodeURIComponent(value.split("/ticket/")[1] || ""), method }
-      : { token: value, method };
+    const { extractTicketToken } = await import("@/lib/tickets");
+    const payload = { token: extractTicketToken(value) || value, method };
 
     const res = await fetch("/api/checkin", {
       method: "POST",

@@ -4,11 +4,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: uilc
-      # Set POSTGRES_PASSWORD in the environment or a local .env (never commit real passwords).
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
+      # Required — set in the environment or a local .env (never commit real passwords).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Postgres}
       POSTGRES_DB: united_in_love
     ports:
-      - "5432:5432"
+      # Loopback only — do not expose Postgres on all interfaces.
+      - "127.0.0.1:5432:5432"
     volumes:
       - uilc_pgdata:/var/lib/postgresql/data
     healthcheck:

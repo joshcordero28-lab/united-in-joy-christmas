@@ -128,7 +128,7 @@ export default function RegisterPage() {
                 </p>
                 <Link
                   className="btn btn-primary w-full"
-                  href={`/ticket/${encodeURIComponent(result.ticketToken)}`}
+                  href={`/ticket#${encodeURIComponent(result.ticketToken)}`}
                 >
                   Open my entry ticket
                 </Link>

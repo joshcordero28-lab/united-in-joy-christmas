@@ -6,7 +6,7 @@ Standalone Next.js app for attendee registration, QR tickets, competition entry,
 
 ```bash
 # 1) Start Postgres (Docker Compose) OR use a hosted DATABASE_URL
-# Set POSTGRES_PASSWORD in the environment (compose default is CHANGE_ME placeholder only)
+# POSTGRES_PASSWORD is required; compose binds Postgres to 127.0.0.1 only
 export POSTGRES_PASSWORD='your-local-db-password'
 docker compose up -d
 
