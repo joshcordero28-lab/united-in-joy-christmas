@@ -117,48 +117,68 @@ export default function TalentShowRegisterPage() {
           Christmas Group Talent Show
         </h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Only registered event attendees can enter. Verify each performer’s entry ticket
-          (camera, QR image, or ticket code). Groups are up to <strong>{MAX_MEMBERS} people</strong>
-          — the leader counts as one. Event check-in is not required.
+          Only registered event attendees can enter. Groups are up to{" "}
+          <strong>{MAX_MEMBERS} people</strong> (existing talent-show limit — the leader
+          counts as one). Event check-in is not required to register an act.
         </p>
 
         <div className="mt-8 space-y-4">
-          <TicketVerifyPanel
-            title="1. Verify group leader"
-            hint="Scan or enter the leader’s event ticket. This does not check anyone in."
-            includeParty
-            initialTicket={savedTicket}
-            verifiedLabel={leader?.fullName || null}
-            onVerified={({ ticket, attendee, partyAttendees: mates }) => {
-              setLeaderTicket(ticket);
-              setLeader(attendee);
-              setPartyAttendees(mates);
-              setSelectedPartyIds([]);
-              setTicketPartners([]);
-              setError(null);
-              localStorage.setItem("uilc_ticket_token", ticket);
-            }}
-            onClear={clearLeader}
-          />
-
-          {!leader && (
-            <p className="text-center text-sm text-[var(--ink-soft)]">
-              Not registered yet?{" "}
-              <Link href="/register" className="font-semibold text-[var(--red)] underline">
-                Register for the event
-              </Link>
-            </p>
-          )}
+          <section className="panel space-y-3 p-5">
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
+                Step 1
+              </p>
+              <h2 className="brand-mark text-2xl text-[var(--red)]">
+                Verify your event registration
+              </h2>
+              <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                Use the group leader’s entry QR: scan with your phone camera, upload a QR
+                image, or type the private ticket code. This confirms registration only — it
+                does not check anyone in at the door.
+              </p>
+            </div>
+            <TicketVerifyPanel
+              title="Leader ticket"
+              hint="Camera scan · QR image upload · or private ticket code"
+              includeParty
+              initialTicket={savedTicket}
+              verifiedLabel={leader?.fullName || null}
+              onVerified={({ ticket, attendee, partyAttendees: mates }) => {
+                setLeaderTicket(ticket);
+                setLeader(attendee);
+                setPartyAttendees(mates);
+                setSelectedPartyIds([]);
+                setTicketPartners([]);
+                setError(null);
+                localStorage.setItem("uilc_ticket_token", ticket);
+              }}
+              onClear={clearLeader}
+            />
+            {!leader && (
+              <p className="text-center text-sm text-[var(--ink-soft)]">
+                Not registered for the event yet?{" "}
+                <Link href="/register" className="font-semibold text-[var(--red)] underline">
+                  Register first
+                </Link>
+              </p>
+            )}
+          </section>
 
           {leader && (
             <form onSubmit={onSubmit} className="panel space-y-4 p-5">
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
+                  Step 2
+                </p>
+                <h2 className="brand-mark text-2xl text-[var(--red)]">Group details &amp; partners</h2>
+              </div>
               <div className="rounded-xl border border-[var(--green)]/30 bg-[var(--green)]/5 p-3">
                 <p className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
-                  Group leader
+                  Group leader (verified)
                 </p>
                 <p className="font-extrabold text-[var(--ink)]">{leader.fullName}</p>
                 <p className="text-xs text-[var(--ink-soft)]">
-                  Ticket verified · you count as 1 of {MAX_MEMBERS} · check-in not required
+                  You count as 1 of {MAX_MEMBERS} · door check-in not required for this form
                 </p>
               </div>
 

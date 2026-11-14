@@ -183,18 +183,18 @@ export function TicketVerifyPanel({
           <div id={readerId.current} className="overflow-hidden rounded-xl" />
           <form onSubmit={onManual} className="space-y-2">
             <label className="label" htmlFor={`${readerId.current}-manual`}>
-              Or enter ticket link / code
+              Or enter private ticket code / link
             </label>
             <textarea
               id={`${readerId.current}-manual`}
               className="field min-h-20 font-mono text-sm"
               value={ticket}
               onChange={(e) => setTicket(e.target.value)}
-              placeholder="Paste ticket link or code"
+              placeholder="Paste private ticket code or ticket link"
               required
             />
             <button className="btn btn-primary w-full" type="submit" disabled={loading}>
-              {loading ? "Verifying…" : "Verify ticket"}
+              {loading ? "Verifying…" : "Verify registration"}
             </button>
           </form>
         </>
