@@ -5,13 +5,16 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { writeAudit } from "@/lib/audit";
 import { extractTicketToken } from "@/lib/tickets";
 
+const MAX_MEMBERS = 2;
+
 const registerSchema = z.object({
-  leaderTicketToken: z.string().min(8).max(500),
   groupName: z.string().trim().min(2).max(80),
   performanceTitle: z.string().trim().min(2).max(120),
   talentType: z.string().trim().min(2).max(80),
-  /// Ticket links or opaque codes for all members (leader may be omitted and is added automatically).
-  memberTicketTokens: z.array(z.string().min(8).max(500)).min(1).max(20),
+  /// Leader proves identity with their entry ticket (from device session / localStorage).
+  leaderTicket: z.string().min(8).max(500),
+  /// Selected member attendee ids — 1 or 2 total; leader must be included.
+  memberAttendeeIds: z.array(z.string().min(1)).min(1).max(MAX_MEMBERS),
 });
 
 export async function GET(request: Request) {
@@ -19,7 +22,6 @@ export async function GET(request: Request) {
   const status = searchParams.get("status");
   const forVoting = searchParams.get("forVoting") === "true";
 
-  // Ballot listing for attendees is only via /api/vote after reveal — never here.
   if (forVoting) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
@@ -34,7 +36,6 @@ export async function GET(request: Request) {
       members: {
         include: { attendee: { select: { id: true, fullName: true } } },
       },
-      _count: { select: { votes: true } },
     },
   });
 
@@ -51,8 +52,8 @@ export async function GET(request: Request) {
         id: m.attendee.id,
         fullName: m.attendee.fullName,
       })),
-      // Vote totals only exposed when caller is organizer (separate endpoint) or revealed — omit here.
     })),
+    maxMembers: MAX_MEMBERS,
   });
 }
 
@@ -73,41 +74,51 @@ export async function POST(request: Request) {
       );
     }
 
-    const tokens = Array.from(
-      new Set(
-        [parsed.data.leaderTicketToken, ...parsed.data.memberTicketTokens]
-          .map(extractTicketToken)
-          .filter((t) => t.length >= 16),
-      ),
-    );
-    if (tokens.length === 0) {
+    const memberIds = Array.from(new Set(parsed.data.memberAttendeeIds));
+    if (memberIds.length < 1 || memberIds.length > MAX_MEMBERS) {
       return NextResponse.json(
-        { error: "Provide valid ticket links for the leader and members." },
+        { error: `A group must have 1–${MAX_MEMBERS} members.` },
         { status: 400 },
       );
     }
-    const leaderToken = extractTicketToken(parsed.data.leaderTicketToken);
+
+    const leaderToken = extractTicketToken(parsed.data.leaderTicket);
+    if (leaderToken.length < 16) {
+      return NextResponse.json(
+        { error: "Open your entry ticket on this device first, then try again." },
+        { status: 401 },
+      );
+    }
 
     const result = await prisma.$transaction(async (tx) => {
-      const attendees = await tx.attendee.findMany({
-        where: { ticketToken: { in: tokens }, status: "ISSUED" },
+      const leader = await tx.attendee.findUnique({
+        where: { ticketToken: leaderToken },
       });
-      if (attendees.length !== tokens.length) {
+      if (!leader || leader.status !== "ISSUED") {
+        return {
+          status: 401 as const,
+          error: "Open your entry ticket on this device first, then try again.",
+        };
+      }
+      if (!memberIds.includes(leader.id)) {
         return {
           status: 400 as const,
-          error: "Every member must be a registered attendee with an issued ticket.",
+          error: "The group leader must be included as one of the members.",
         };
       }
 
-      const byToken = Object.fromEntries(attendees.map((a) => [a.ticketToken, a]));
-      const leader = byToken[leaderToken];
-      if (!leader) {
-        return { status: 401 as const, error: "Leader ticket invalid." };
+      const attendees = await tx.attendee.findMany({
+        where: { id: { in: memberIds }, status: "ISSUED" },
+      });
+      if (attendees.length !== memberIds.length) {
+        return {
+          status: 400 as const,
+          error: "Every member must be a registered guest with an issued ticket.",
+        };
       }
 
-      // Reject if any member already in a group
       const already = await tx.talentGroupMember.findMany({
-        where: { attendeeId: { in: attendees.map((a) => a.id) } },
+        where: { attendeeId: { in: memberIds } },
         include: { group: { select: { groupName: true } } },
       });
       if (already.length > 0) {
@@ -125,7 +136,7 @@ export async function POST(request: Request) {
           leaderAttendeeId: leader.id,
           status: "PENDING",
           members: {
-            create: attendees.map((a) => ({ attendeeId: a.id })),
+            create: memberIds.map((attendeeId) => ({ attendeeId })),
           },
         },
         include: {
@@ -145,7 +156,7 @@ export async function POST(request: Request) {
       action: "talent_group.register",
       entityType: "TalentGroup",
       entityId: result.group.id,
-      detail: result.group.groupName,
+      detail: `${result.group.groupName} (${result.group.members.length} members)`,
     });
 
     return NextResponse.json({
@@ -154,6 +165,7 @@ export async function POST(request: Request) {
       status: result.group.status,
       groupName: result.group.groupName,
       memberCount: result.group.members.length,
+      maxMembers: MAX_MEMBERS,
     });
   } catch (err) {
     console.error("group register failed", err);

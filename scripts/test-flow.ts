@@ -116,14 +116,37 @@ async function main() {
   assert(r1.ok, `Register A failed: ${JSON.stringify(a)}`);
   const tokenA = String(a.ticketToken);
   const codeA = String(a.votingCredential);
+  const idA = String(a.attendeeId);
 
   const { json: b } = await req("/api/register", {
     method: "POST",
     body: JSON.stringify({ fullName: `Blake Talent ${stamp}`, phone: "555-0102" }),
   });
   const tokenB = String(b.ticketToken);
-  const codeB = String(b.votingCredential);
+  const idB = String(b.attendeeId);
   pass("Attendees registered");
+
+  const { json: fromTicket } = await req("/api/attendees/from-ticket", {
+    method: "POST",
+    body: JSON.stringify({ ticket: tokenA }),
+  });
+  assert(fromTicket.id === idA, "from-ticket resolves leader attendee id");
+  assert(!("ticketToken" in fromTicket), "from-ticket must not return ticket tokens");
+  pass("from-ticket resolves leader without exposing token");
+
+  const { json: searchJ } = await req(
+    `/api/attendees/search?q=${encodeURIComponent(`Blake Talent ${stamp}`)}`,
+  );
+  const found = (searchJ.attendees as { id: string; fullName: string; contactHint?: string }[]) || [];
+  assert(
+    found.some((p) => p.id === idB),
+    `Search must find partner Blake: ${JSON.stringify(searchJ)}`,
+  );
+  assert(
+    found.every((p) => !("ticketToken" in p)),
+    "Search results must not include ticket tokens",
+  );
+  pass("Attendee search returns registered guests for member pick");
 
   const staffJar: Jar = new Map();
   await req("/api/auth/staff/login", {
@@ -146,20 +169,35 @@ async function main() {
   });
   pass("Check-ins complete");
 
+  // Reject free-text member ticket tokens / more than 2 members
+  const { res: gBad } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      leaderTicket: tokenA,
+      groupName: `Too Many ${stamp}`,
+      performanceTitle: "Nope",
+      talentType: "Song / Vocal",
+      memberAttendeeIds: [idA, idB, "extra-id"],
+    }),
+  });
+  assert(gBad.status === 400, "More than 2 members must be rejected");
+  pass("Max 2 members enforced server-side");
+
   const { res: g1, json: g1j } = await req("/api/groups", {
     method: "POST",
     body: JSON.stringify({
-      leaderTicketToken: tokenA,
+      leaderTicket: tokenA,
       groupName: `Joyful Voices ${stamp}`,
       performanceTitle: "Carol Medley",
       talentType: "Song / Vocal",
-      memberTicketTokens: [tokenA, tokenB],
+      memberAttendeeIds: [idA, idB],
     }),
   });
   assert(g1.ok, `Group register failed: ${JSON.stringify(g1j)}`);
+  assert(g1j.memberCount === 2, `Expected 2 members, got ${g1j.memberCount}`);
+  assert(g1j.maxMembers === 2, "maxMembers should be 2");
   const groupId = String(g1j.groupId);
-  pass("Talent group registered");
-
+  pass("Talent group registered via attendee ids (max 2)");
   await req("/api/organizer/groups", {
     method: "PATCH",
     jar: orgJar,
