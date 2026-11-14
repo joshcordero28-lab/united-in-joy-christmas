@@ -13,8 +13,11 @@ const registerSchema = z.object({
   talentType: z.string().trim().min(2).max(80),
   /// Leader proves identity with their entry ticket (from device session / localStorage).
   leaderTicket: z.string().min(8).max(500),
-  /// Selected member attendee ids — 1 or 2 total; leader must be included.
-  memberAttendeeIds: z.array(z.string().min(1)).min(1).max(MAX_MEMBERS),
+  /**
+   * Partner entry tickets (not attendee ids). Each partner must consent by sharing
+   * their own ticket link/code. Leader is added automatically — do not include them here.
+   */
+  partnerTickets: z.array(z.string().min(8).max(500)).max(MAX_MEMBERS - 1).default([]),
 });
 
 export async function GET(request: Request) {
@@ -74,19 +77,31 @@ export async function POST(request: Request) {
       );
     }
 
-    const memberIds = Array.from(new Set(parsed.data.memberAttendeeIds));
-    if (memberIds.length < 1 || memberIds.length > MAX_MEMBERS) {
-      return NextResponse.json(
-        { error: `A group must have 1–${MAX_MEMBERS} members.` },
-        { status: 400 },
-      );
-    }
-
     const leaderToken = extractTicketToken(parsed.data.leaderTicket);
     if (leaderToken.length < 16) {
       return NextResponse.json(
         { error: "Open your entry ticket on this device first, then try again." },
         { status: 401 },
+      );
+    }
+
+    const partnerTokens = Array.from(
+      new Set(
+        parsed.data.partnerTickets
+          .map((t) => extractTicketToken(t))
+          .filter((t) => t.length >= 16),
+      ),
+    );
+    if (partnerTokens.length > MAX_MEMBERS - 1) {
+      return NextResponse.json(
+        { error: `Groups are limited to ${MAX_MEMBERS} members (including you).` },
+        { status: 400 },
+      );
+    }
+    if (partnerTokens.includes(leaderToken)) {
+      return NextResponse.json(
+        { error: "Do not add your own ticket as a partner." },
+        { status: 400 },
       );
     }
 
@@ -100,22 +115,21 @@ export async function POST(request: Request) {
           error: "Open your entry ticket on this device first, then try again.",
         };
       }
-      if (!memberIds.includes(leader.id)) {
+
+      const partners =
+        partnerTokens.length === 0
+          ? []
+          : await tx.attendee.findMany({
+              where: { ticketToken: { in: partnerTokens }, status: "ISSUED" },
+            });
+      if (partners.length !== partnerTokens.length) {
         return {
           status: 400 as const,
-          error: "The group leader must be included as one of the members.",
+          error: "Every partner must share a valid issued entry ticket.",
         };
       }
 
-      const attendees = await tx.attendee.findMany({
-        where: { id: { in: memberIds }, status: "ISSUED" },
-      });
-      if (attendees.length !== memberIds.length) {
-        return {
-          status: 400 as const,
-          error: "Every member must be a registered guest with an issued ticket.",
-        };
-      }
+      const memberIds = [leader.id, ...partners.map((p) => p.id)];
 
       const already = await tx.talentGroupMember.findMany({
         where: { attendeeId: { in: memberIds } },

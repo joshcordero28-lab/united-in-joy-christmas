@@ -16,16 +16,25 @@ const schema = z.object({
   phone: z.string().trim().max(40).optional().or(z.literal("")),
   email: z.string().trim().email().optional().or(z.literal("")),
   notes: z.string().trim().max(300).optional().or(z.literal("")),
+  /** Honeypot — must stay empty. Bots that fill hidden fields are rejected. */
+  company: z.string().max(200).optional().or(z.literal("")),
 });
 
 export async function POST(request: Request) {
   try {
     const ip = clientIp(request);
-    const limited = await rateLimit(`register:${ip}`, 8, 60_000);
+    const limited = await rateLimit(`register:${ip}`, 3, 60_000);
     if (!limited.ok) {
       return NextResponse.json(
         { error: "Too many registration attempts. Please wait and try again." },
         { status: 429, headers: { "Retry-After": String(limited.retryAfterSeconds) } },
+      );
+    }
+    const daily = await rateLimit(`register-day:${ip}`, 20, 24 * 60 * 60 * 1000);
+    if (!daily.ok) {
+      return NextResponse.json(
+        { error: "Daily registration limit reached for this network. Try again tomorrow." },
+        { status: 429, headers: { "Retry-After": String(daily.retryAfterSeconds) } },
       );
     }
 
@@ -33,6 +42,17 @@ export async function POST(request: Request) {
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid registration details." }, { status: 400 });
+    }
+    if (parsed.data.company && parsed.data.company.trim() !== "") {
+      // Silent success for bots — do not create an attendee.
+      return NextResponse.json({
+        attendeeId: "ok",
+        fullName: parsed.data.fullName,
+        status: "ISSUED",
+        ticketToken: null,
+        votingCredential: null,
+        message: "Registration complete. Save your ticket and voting code.",
+      });
     }
 
     const event = await getEventConfig();

@@ -24,14 +24,22 @@ function sessionPassword(): string {
   return secret;
 }
 
+function useSecureCookies(): boolean {
+  // Hosted HTTPS apps always need Secure cookies; local http://127.0.0.1 stays off.
+  const base = process.env.APP_BASE_URL || "";
+  if (base.startsWith("https://")) return true;
+  return process.env.NODE_ENV === "production";
+}
+
 function staffSessionOptions(): SessionOptions {
   return {
     cookieName: "uilc_staff_session",
     password: sessionPassword(),
     cookieOptions: {
-      secure: process.env.NODE_ENV === "production",
+      secure: useSecureCookies(),
       httpOnly: true,
       sameSite: "lax",
+      path: "/",
       maxAge: 60 * 60 * 12,
     },
   };
@@ -42,9 +50,10 @@ function voterSessionOptions(): SessionOptions {
     cookieName: "uilc_voter_session",
     password: sessionPassword(),
     cookieOptions: {
-      secure: process.env.NODE_ENV === "production",
+      secure: useSecureCookies(),
       httpOnly: true,
       sameSite: "lax",
+      path: "/",
       maxAge: 60 * 60 * 8,
     },
   };

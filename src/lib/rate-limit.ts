@@ -36,8 +36,23 @@ export async function rateLimit(
   return { ok: true };
 }
 
+/**
+ * Client IP for rate limiting. Do not trust the left-most X-Forwarded-For entry
+ * (client-spoofable). Prefer X-Real-IP from the edge, else the right-most
+ * forwarded hop (typically appended by the trusted proxy).
+ */
 export function clientIp(request: Request): string {
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
+
   const xf = request.headers.get("x-forwarded-for");
-  if (xf) return xf.split(",")[0]?.trim() || "unknown";
-  return request.headers.get("x-real-ip") || "unknown";
+  if (xf) {
+    const parts = xf
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1]!;
+  }
+
+  return "unknown";
 }

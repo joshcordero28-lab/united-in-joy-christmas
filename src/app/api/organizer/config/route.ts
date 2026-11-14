@@ -17,8 +17,19 @@ const schema = z.object({
 });
 
 export async function GET() {
-  const event = await getEventConfig();
-  return NextResponse.json({ event });
+  try {
+    const session = await getStaffSession();
+    try {
+      requireStaff(session, ["ORGANIZER", "STAFF"]);
+    } catch {
+      return NextResponse.json({ error: "Staff login required." }, { status: 401 });
+    }
+    const event = await getEventConfig();
+    return NextResponse.json({ event });
+  } catch (err) {
+    console.error("config get failed", err);
+    return NextResponse.json({ error: "Failed to load config." }, { status: 500 });
+  }
 }
 
 export async function PATCH(request: Request) {

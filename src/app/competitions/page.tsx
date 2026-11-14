@@ -15,23 +15,20 @@ const TALENT_TYPES = [
 ];
 
 const MAX_MEMBERS = 3;
+const MAX_PARTNERS = MAX_MEMBERS - 1;
 
 type Person = {
   id: string;
   fullName: string;
-  contactHint?: string | null;
 };
 
 export default function TalentShowRegisterPage() {
   const [leaderTicket, setLeaderTicket] = useState("");
   const [leader, setLeader] = useState<Person | null>(null);
-  const [members, setMembers] = useState<Person[]>([]);
+  const [partnerTickets, setPartnerTickets] = useState<string[]>([""]);
   const [groupName, setGroupName] = useState("");
   const [performanceTitle, setPerformanceTitle] = useState("");
   const [talentType, setTalentType] = useState(TALENT_TYPES[0]);
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Person[]>([]);
-  const [searching, setSearching] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,51 +45,28 @@ export default function TalentShowRegisterPage() {
       .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
       .then(({ ok, d }) => {
         if (!ok) return;
-        const me = { id: d.id as string, fullName: d.fullName as string };
-        setLeader(me);
-        setMembers([me]);
+        setLeader({ id: d.id as string, fullName: d.fullName as string });
       })
       .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    if (query.trim().length < 2) {
-      setResults([]);
-      return;
-    }
-    const handle = setTimeout(async () => {
-      setSearching(true);
-      try {
-        const res = await fetch(`/api/attendees/search?q=${encodeURIComponent(query.trim())}`);
-        const data = await res.json();
-        setResults(data.attendees || []);
-      } catch {
-        setResults([]);
-      } finally {
-        setSearching(false);
-      }
-    }, 250);
-    return () => clearTimeout(handle);
-  }, [query]);
-
-  function addMember(person: Person) {
-    setError(null);
-    if (members.some((m) => m.id === person.id)) return;
-    if (members.length >= MAX_MEMBERS) {
-      setError(`Groups are limited to ${MAX_MEMBERS} members.`);
-      return;
-    }
-    setMembers((prev) => [...prev, person]);
-    setQuery("");
-    setResults([]);
+  function updatePartnerTicket(index: number, value: string) {
+    setPartnerTickets((prev) => prev.map((t, i) => (i === index ? value : t)));
   }
 
-  function removeMember(id: string) {
-    if (leader && id === leader.id) {
-      setError("You (the group leader) stay on the list. Remove your partner instead.");
-      return;
-    }
-    setMembers((prev) => prev.filter((m) => m.id !== id));
+  function addPartnerSlot() {
+    setError(null);
+    setPartnerTickets((prev) => {
+      if (prev.length >= MAX_PARTNERS) {
+        setError(`Groups are limited to ${MAX_MEMBERS} members (including you).`);
+        return prev;
+      }
+      return [...prev, ""];
+    });
+  }
+
+  function removePartnerSlot(index: number) {
+    setPartnerTickets((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function onSubmit(e: FormEvent) {
@@ -103,12 +77,10 @@ export default function TalentShowRegisterPage() {
       setError("Open your entry ticket on this phone first, then come back here.");
       return;
     }
-    if (members.length < 1 || members.length > MAX_MEMBERS) {
-      setError(`Choose 1–${MAX_MEMBERS} members (you count as one).`);
-      return;
-    }
-    if (!members.some((m) => m.id === leader.id)) {
-      setError("You must be included as a group member.");
+
+    const partners = partnerTickets.map((t) => t.trim()).filter(Boolean);
+    if (partners.length > MAX_PARTNERS) {
+      setError(`Choose up to ${MAX_PARTNERS} partners (you count as one).`);
       return;
     }
 
@@ -122,7 +94,7 @@ export default function TalentShowRegisterPage() {
           performanceTitle,
           talentType,
           leaderTicket,
-          memberAttendeeIds: members.map((m) => m.id),
+          partnerTickets: partners,
         }),
       });
       const data = await res.json();
@@ -140,8 +112,6 @@ export default function TalentShowRegisterPage() {
     }
   }
 
-  const slotsLeft = MAX_MEMBERS - members.length;
-
   return (
     <div className="page-shell">
       <ClientSiteHeader />
@@ -152,8 +122,8 @@ export default function TalentShowRegisterPage() {
         </h1>
         <p className="mt-2 text-[var(--ink-soft)]">
           Register a group performance act of up to <strong>{MAX_MEMBERS} people</strong>.
-          Search and select registered guests — tickets are linked automatically. You (the
-          leader) count as one of the {MAX_MEMBERS}.
+          Partners join by sharing their own entry ticket link — that proves consent. You
+          (the leader) count as one of the {MAX_MEMBERS}.
         </p>
 
         {!leader ? (
@@ -236,29 +206,26 @@ export default function TalentShowRegisterPage() {
             </div>
 
             <div>
-              <p className="label">
-                Members ({members.length}/{MAX_MEMBERS})
+              <p className="label">Partners (optional, up to {MAX_PARTNERS})</p>
+              <p className="mb-2 text-xs text-[var(--ink-soft)]">
+                Ask each partner to open their ticket and share the ticket link with you.
+                Paste those links below — we do not add people by name search alone.
               </p>
-              <ul className="mb-3 space-y-2">
-                {members.map((m) => (
-                  <li
-                    key={m.id}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-[var(--red)]/10 bg-white/80 px-3 py-2"
-                  >
-                    <div>
-                      <p className="font-semibold">{m.fullName}</p>
-                      {m.id === leader.id && (
-                        <p className="text-xs text-[var(--green)]">Leader (you)</p>
-                      )}
-                      {m.contactHint && (
-                        <p className="text-xs text-[var(--ink-soft)]">{m.contactHint}</p>
-                      )}
-                    </div>
-                    {m.id !== leader.id && (
+              <ul className="space-y-2">
+                {partnerTickets.map((ticket, index) => (
+                  <li key={index} className="flex gap-2">
+                    <input
+                      className="field flex-1"
+                      value={ticket}
+                      onChange={(e) => updatePartnerTicket(index, e.target.value)}
+                      placeholder="Partner ticket link or code"
+                      autoComplete="off"
+                    />
+                    {partnerTickets.length > 1 && (
                       <button
                         type="button"
                         className="btn btn-secondary !min-h-10 !px-3 !text-sm"
-                        onClick={() => removeMember(m.id)}
+                        onClick={() => removePartnerSlot(index)}
                       >
                         Remove
                       </button>
@@ -266,54 +233,14 @@ export default function TalentShowRegisterPage() {
                   </li>
                 ))}
               </ul>
-
-              {slotsLeft > 0 ? (
-                <div>
-                  <label className="label" htmlFor="memberSearch">
-                    Add {slotsLeft === 1 ? "another partner" : "partners"} — search by name
-                  </label>
-                  <input
-                    id="memberSearch"
-                    className="field"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Type at least 2 letters"
-                    autoComplete="off"
-                  />
-                  {searching && (
-                    <p className="mt-1 text-xs text-[var(--ink-soft)]">Searching…</p>
-                  )}
-                  {results.length > 0 && (
-                    <ul className="mt-2 max-h-48 space-y-1 overflow-auto rounded-xl border border-[var(--red)]/10 bg-white p-2">
-                      {results
-                        .filter((r) => !members.some((m) => m.id === r.id))
-                        .map((r) => (
-                          <li key={r.id}>
-                            <button
-                              type="button"
-                              className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left hover:bg-[var(--gold)]/15"
-                              onClick={() => addMember(r)}
-                            >
-                              <span>
-                                <span className="font-semibold">{r.fullName}</span>
-                                {r.contactHint && (
-                                  <span className="ml-2 text-xs text-[var(--ink-soft)]">
-                                    {r.contactHint}
-                                  </span>
-                                )}
-                              </span>
-                              <span className="text-sm font-bold text-[var(--red)]">Add</span>
-                            </button>
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                </div>
-              ) : (
-                <p className="text-sm text-[var(--ink-soft)]">
-                  Member limit reached ({MAX_MEMBERS}). Remove a partner to choose someone
-                  else.
-                </p>
+              {partnerTickets.length < MAX_PARTNERS && (
+                <button
+                  type="button"
+                  className="btn btn-secondary mt-2 w-full"
+                  onClick={addPartnerSlot}
+                >
+                  Add another partner ticket
+                </button>
               )}
             </div>
 

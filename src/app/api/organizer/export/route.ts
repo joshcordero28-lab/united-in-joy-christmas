@@ -2,9 +2,15 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getStaffSession, requireStaff } from "@/lib/session";
 
+/** Escape CSV cells and neutralize spreadsheet formula injection (=, +, -, @, tab, CR). */
 function csvEscape(value: string | number | null | undefined): string {
-  const s = value == null ? "" : String(value);
-  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  let s = value == null ? "" : String(value);
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
+  if (/[",\n\r]/.test(s) || s.includes("'")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
   return s;
 }
 

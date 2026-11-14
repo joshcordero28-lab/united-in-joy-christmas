@@ -28,6 +28,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid credentials." }, { status: 400 });
     }
 
+    const staffCount = await prisma.staffAccount.count();
+    if (staffCount === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Staff accounts are not set up yet. Ensure ORGANIZER_* and STAFF_* secrets are set, then republish so seed can run.",
+        },
+        { status: 503 },
+      );
+    }
+
     const account = await prisma.staffAccount.findUnique({
       where: { username: parsed.data.username },
     });

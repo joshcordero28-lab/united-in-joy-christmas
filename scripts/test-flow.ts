@@ -181,7 +181,7 @@ async function main() {
   });
   pass("Check-ins complete");
 
-  // Reject more than 3 members
+  // Reject more than 2 partners (3 total with leader)
   const { res: gBad } = await req("/api/groups", {
     method: "POST",
     body: JSON.stringify({
@@ -189,10 +189,10 @@ async function main() {
       groupName: `Too Many ${stamp}`,
       performanceTitle: "Nope",
       talentType: "Song / Vocal",
-      memberAttendeeIds: [idA, idB, idC, "extra-id"],
+      partnerTickets: [tokenB, tokenC, "extra-token-xxxxxxxx"],
     }),
   });
-  assert(gBad.status === 400, "More than 3 members must be rejected");
+  assert(gBad.status === 400, "More than 2 partners must be rejected");
   pass("Max 3 members enforced server-side");
 
   const { res: g1, json: g1j } = await req("/api/groups", {
@@ -202,14 +202,14 @@ async function main() {
       groupName: `Joyful Voices ${stamp}`,
       performanceTitle: "Carol Medley",
       talentType: "Song / Vocal",
-      memberAttendeeIds: [idA, idB, idC],
+      partnerTickets: [tokenB, tokenC],
     }),
   });
   assert(g1.ok, `Group register failed: ${JSON.stringify(g1j)}`);
   assert(g1j.memberCount === 3, `Expected 3 members, got ${g1j.memberCount}`);
   assert(g1j.maxMembers === 3, "maxMembers should be 3");
   const groupId = String(g1j.groupId);
-  pass("Talent group registered via attendee ids (max 3)");
+  pass("Talent group registered via partner tickets (max 3)");
   await req("/api/organizer/groups", {
     method: "PATCH",
     jar: orgJar,

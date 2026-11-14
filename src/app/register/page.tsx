@@ -33,6 +33,7 @@ export default function RegisterPage() {
           phone: form.get("phone"),
           email: form.get("email"),
           notes: form.get("notes"),
+          company: form.get("company"),
         }),
       });
       const data = await res.json();
@@ -88,6 +89,14 @@ export default function RegisterPage() {
                 Notes (optional)
               </label>
               <textarea className="field min-h-24" id="notes" name="notes" />
+            </div>
+            {/* Honeypot — leave empty; hidden from people, filled by many bots */}
+            <div
+              aria-hidden="true"
+              style={{ position: "absolute", left: "-10000px", top: "auto", width: 1, height: 1, overflow: "hidden" }}
+            >
+              <label htmlFor="company">Company</label>
+              <input id="company" name="company" type="text" tabIndex={-1} autoComplete="off" />
             </div>
             {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" disabled={loading} type="submit">
