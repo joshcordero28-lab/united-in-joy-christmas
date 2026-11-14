@@ -3,14 +3,15 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { writeAudit } from "@/lib/audit";
+import { extractTicketToken } from "@/lib/tickets";
 
 const registerSchema = z.object({
-  leaderTicketToken: z.string().min(16).max(200),
+  leaderTicketToken: z.string().min(8).max(500),
   groupName: z.string().trim().min(2).max(80),
   performanceTitle: z.string().trim().min(2).max(120),
   talentType: z.string().trim().min(2).max(80),
-  /// Ticket tokens of all members including the leader (or leader may be omitted and added automatically).
-  memberTicketTokens: z.array(z.string().min(16).max(200)).min(1).max(20),
+  /// Ticket links or opaque codes for all members (leader may be omitted and is added automatically).
+  memberTicketTokens: z.array(z.string().min(8).max(500)).min(1).max(20),
 });
 
 export async function GET(request: Request) {
@@ -73,8 +74,19 @@ export async function POST(request: Request) {
     }
 
     const tokens = Array.from(
-      new Set([parsed.data.leaderTicketToken, ...parsed.data.memberTicketTokens]),
+      new Set(
+        [parsed.data.leaderTicketToken, ...parsed.data.memberTicketTokens]
+          .map(extractTicketToken)
+          .filter((t) => t.length >= 16),
+      ),
     );
+    if (tokens.length === 0) {
+      return NextResponse.json(
+        { error: "Provide valid ticket links for the leader and members." },
+        { status: 400 },
+      );
+    }
+    const leaderToken = extractTicketToken(parsed.data.leaderTicketToken);
 
     const result = await prisma.$transaction(async (tx) => {
       const attendees = await tx.attendee.findMany({
@@ -88,7 +100,7 @@ export async function POST(request: Request) {
       }
 
       const byToken = Object.fromEntries(attendees.map((a) => [a.ticketToken, a]));
-      const leader = byToken[parsed.data.leaderTicketToken];
+      const leader = byToken[leaderToken];
       if (!leader) {
         return { status: 401 as const, error: "Leader ticket invalid." };
       }

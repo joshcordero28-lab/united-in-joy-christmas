@@ -17,7 +17,7 @@ export function CopyLinkButton({ link }: { link: string }) {
 
   return (
     <button type="button" className="btn btn-primary w-full" onClick={copy}>
-      {copied ? "Copied!" : "Copy ticket link"}
+      {copied ? "Link copied!" : "Share ticket link"}
     </button>
   );
 }

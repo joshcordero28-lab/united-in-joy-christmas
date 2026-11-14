@@ -77,8 +77,8 @@ export default function TalentShowRegisterPage() {
         </h1>
         <p className="mt-2 text-[var(--ink-soft)]">
           Group leaders register the act for this group performance competition.
-          Every member must already be a registered event attendee (use their ticket
-          tokens). Organizers approve groups and set the performance order.
+          Every member must already have an entry ticket — paste each member&apos;s
+          ticket link. Organizers approve groups and set the performance order.
         </p>
 
         <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
@@ -127,30 +127,32 @@ export default function TalentShowRegisterPage() {
           </div>
           <div>
             <label className="label" htmlFor="leaderToken">
-              Group leader ticket token *
+              Group leader ticket link *
             </label>
             <textarea
               id="leaderToken"
-              className="field min-h-20 font-mono text-sm"
+              className="field min-h-20 text-sm"
               value={leaderToken}
               onChange={(e) => setLeaderToken(e.target.value)}
+              placeholder="Paste your ticket link"
               required
             />
           </div>
           <div>
             <label className="label" htmlFor="memberTokens">
-              Member ticket tokens * (one per line; include all performers)
+              Member ticket links * (one per line; include all performers)
             </label>
             <textarea
               id="memberTokens"
-              className="field min-h-32 font-mono text-sm"
+              className="field min-h-32 text-sm"
               value={memberTokens}
               onChange={(e) => setMemberTokens(e.target.value)}
-              placeholder={"token-for-member-1\ntoken-for-member-2"}
+              placeholder={"https://…/ticket/…\nhttps://…/ticket/…"}
               required
             />
             <p className="mt-1 text-xs text-[var(--ink-soft)]">
-              Leader token is added automatically if omitted from this list.
+              Your leader ticket is added automatically if it isn&apos;t already in the
+              list.
             </p>
           </div>
           {error && <p className="font-semibold text-[var(--red)]">{error}</p>}

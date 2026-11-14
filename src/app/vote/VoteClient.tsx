@@ -108,7 +108,7 @@ export function VoteClient({
           <form onSubmit={login} className="panel mt-8 space-y-4 p-5">
             <div>
               <label className="label" htmlFor="ticketToken">
-                Ticket token
+                Ticket link
               </label>
               <textarea
                 id="ticketToken"

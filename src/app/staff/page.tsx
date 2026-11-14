@@ -115,7 +115,8 @@ export default function StaffPage() {
       <div className="mx-auto max-w-lg px-4 py-8">
         <h1 className="brand-mark text-4xl text-[var(--red)]">Staff check-in</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Scan QR tickets or enter a token manually. Duplicate check-ins are blocked.
+          Scan entry QR codes, or paste a ticket link as backup. Duplicate check-ins
+          are blocked.
         </p>
 
         {!staff ? (
@@ -183,7 +184,7 @@ export default function StaffPage() {
             >
               <div>
                 <label className="label" htmlFor="token">
-                  Ticket token or ticket URL
+                  Ticket link (backup if QR won&apos;t scan)
                 </label>
                 <textarea
                   id="token"

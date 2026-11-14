@@ -59,7 +59,8 @@ export default function RegisterPage() {
         <p className="script-mark text-2xl text-[var(--red)]">Join us</p>
         <h1 className="brand-mark text-4xl text-[var(--red)] sm:text-5xl">Register</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Get your QR ticket instantly. Save your private guest code with your ticket.
+          Get your entry ticket with a QR code for the door. Keep your private guest
+          code with it.
         </p>
 
         {!result ? (
@@ -90,7 +91,7 @@ export default function RegisterPage() {
             </div>
             {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" disabled={loading} type="submit">
-              {loading ? "Registering…" : "Get my ticket"}
+              {loading ? "Registering…" : "Get my entry ticket"}
             </button>
           </form>
         ) : (
@@ -101,17 +102,26 @@ export default function RegisterPage() {
             <p className="text-[var(--ink-soft)]">{result.message}</p>
             {result.ticketToken && (
               <>
-                <p className="text-sm text-[var(--ink-soft)]">
-                  Save your ticket link and private guest code now — they are not emailed.
+                <p className="text-sm font-extrabold text-[var(--red)]">
+                  Next: open your QR and show it at the door.
                 </p>
-                <p className="rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-3 font-mono text-sm">
-                  Guest code: <strong className="text-[var(--red)]">{result.votingCredential}</strong>
+                <p className="text-sm text-[var(--ink-soft)]">
+                  Save the ticket page on your phone. Tickets are not emailed.
+                </p>
+                <p className="rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-3 text-sm">
+                  Private guest code:{" "}
+                  <strong className="font-mono tracking-wider text-[var(--red)]">
+                    {result.votingCredential}
+                  </strong>
+                  <span className="mt-1 block text-xs font-normal text-[var(--ink-soft)]">
+                    Keep this with your ticket (you may need it later at the event).
+                  </span>
                 </p>
                 <Link
                   className="btn btn-primary w-full"
                   href={`/ticket/${encodeURIComponent(result.ticketToken)}`}
                 >
-                  View QR ticket
+                  Open my entry ticket
                 </Link>
               </>
             )}
