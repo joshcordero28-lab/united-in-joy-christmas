@@ -34,8 +34,8 @@ export default async function HomePage() {
             Christmas 2026
           </p>
           <p className="animate-rise-delay mt-5 max-w-xl text-lg text-[var(--cream)]/90 sm:text-xl">
-            Get your QR ticket, join the Christmas Group Talent Show, and cast your
-            Audience Choice vote.
+            Get your QR ticket and join the Christmas Group Talent Show — a festive
+            group performance competition.
           </p>
           <div className="animate-rise-delay mt-8 flex flex-col gap-3 sm:flex-row">
             <Link href="/register" className="btn btn-primary cta-pulse">

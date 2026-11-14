@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { VotingState } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getVoterSession } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
+import { getPublicVotingGate } from "@/lib/voting-public";
 import { writeAudit } from "@/lib/audit";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
@@ -11,8 +11,19 @@ const schema = z.object({
   groupId: z.string().min(1),
 });
 
+/** Opaque response when voting is not revealed — no ballot/config leakage. */
+function unavailable() {
+  return NextResponse.json({ error: "Not found." }, { status: 404 });
+}
+
 export async function POST(request: Request) {
   try {
+    const gate = await getPublicVotingGate();
+    if (!gate.visible) return unavailable();
+    if (!gate.open) {
+      return NextResponse.json({ error: "Voting is closed." }, { status: 403 });
+    }
+
     const session = await getVoterSession();
     if (!session.isLoggedIn || !session.attendeeId) {
       return NextResponse.json({ error: "Voting login required." }, { status: 401 });
@@ -31,13 +42,6 @@ export async function POST(request: Request) {
     }
 
     const event = await getEventConfig();
-    if (event.talentVotingState !== VotingState.OPEN) {
-      return NextResponse.json(
-        { error: "Audience voting is not open." },
-        { status: 403 },
-      );
-    }
-
     const voter = await prisma.attendee.findUnique({ where: { id: session.attendeeId } });
     if (!voter || voter.status !== "ISSUED") {
       return NextResponse.json({ error: "Voter ticket invalid." }, { status: 403 });
@@ -58,10 +62,7 @@ export async function POST(request: Request) {
 
     try {
       const vote = await prisma.audienceVote.create({
-        data: {
-          voterId: voter.id,
-          groupId: group.id,
-        },
+        data: { voterId: voter.id, groupId: group.id },
       });
 
       await writeAudit({
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
       const code = typeof e === "object" && e && "code" in e ? (e as { code: string }).code : "";
       if (code === "P2002") {
         return NextResponse.json(
-          { error: "You already cast your Audience Choice vote." },
+          { error: "You already cast your vote." },
           { status: 409 },
         );
       }
@@ -90,12 +91,14 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
+  const gate = await getPublicVotingGate();
+  if (!gate.visible) return unavailable();
+
   const session = await getVoterSession();
   if (!session.isLoggedIn || !session.attendeeId) {
     return NextResponse.json({ error: "Voting login required." }, { status: 401 });
   }
 
-  const event = await getEventConfig();
   const myVote = await prisma.audienceVote.findUnique({
     where: { voterId: session.attendeeId },
     select: { groupId: true, createdAt: true },
@@ -113,12 +116,30 @@ export async function GET() {
     },
   });
 
+  let results: { groupId: string; groupName: string; votes: number }[] | null = null;
+  if (gate.resultsPublished) {
+    const tallies = await prisma.audienceVote.groupBy({
+      by: ["groupId"],
+      _count: { _all: true },
+    });
+    const nameById = Object.fromEntries(groups.map((g) => [g.id, g.groupName]));
+    results = tallies
+      .map((t) => ({
+        groupId: t.groupId,
+        groupName: nameById[t.groupId] || t.groupId,
+        votes: t._count._all,
+      }))
+      .sort((a, b) => b.votes - a.votes);
+  }
+
   return NextResponse.json({
     voter: { id: session.attendeeId, fullName: session.attendeeName },
-    talentVotingState: event.talentVotingState,
+    open: gate.open,
+    resultsPublished: gate.resultsPublished,
     myVote,
-    groups,
-    label: "Vote for Your Favorite Group",
-    resultsLabel: "Audience Choice",
+    groups: gate.open || gate.resultsPublished || myVote ? groups : groups,
+    // Always list approved groups once visibility is revealed (needed for closed-but-revealed UX).
+    results,
+    resultsLabel: gate.resultsPublished ? "Audience Choice" : null,
   });
 }

@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { SiteHeader } from "@/components/SiteHeader";
+import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
 type Dashboard = {
@@ -48,11 +48,14 @@ type Attendee = {
 };
 
 type VotingInfo = {
-  talentVotingState: string;
+  visibility: "HIDDEN" | "REVEALED";
+  talentVotingState: "CLOSED" | "OPEN";
+  resultsPublished: boolean;
   resultsLabel: string;
-  results: null | { groupId: string; groupName: string; performanceTitle: string; votes: number }[];
+  privateResults: { groupId: string; groupName: string; performanceTitle: string; votes: number }[];
   ties: null | { groupId: string; groupName: string; votes: number }[];
   voteCount: number;
+  publicPhase?: string;
   legacyKingQueenVoteCount?: number;
   note?: string;
 };
@@ -165,24 +168,25 @@ export default function OrganizerPage() {
     await loadAll();
   }
 
-  async function setVoteState(state: string) {
+  async function patchVoting(body: Record<string, unknown>, label: string) {
     setError(null);
     setMessage(null);
-    let resolveTieGroupId: string | undefined;
-    if (state === "REVEALED" && voting?.ties && voting.ties.length > 1) {
-      resolveTieGroupId =
+    let payload = { ...body };
+    if (body.resultsPublished === true && voting?.ties && voting.ties.length > 1) {
+      const resolveTieGroupId =
         prompt(
           `Audience Choice tie between: ${voting.ties.map((t) => t.groupName).join(", ")}. Enter group id:`,
         ) || undefined;
       if (!resolveTieGroupId) {
-        setError("Reveal cancelled — tie must be resolved.");
+        setError("Publish cancelled — tie must be resolved.");
         return;
       }
+      payload = { ...payload, resolveTieGroupId };
     }
     const res = await fetch("/api/organizer/voting", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ state, resolveTieGroupId }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -195,11 +199,11 @@ export default function OrganizerPage() {
         const retry = await fetch("/api/organizer/voting", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ state, resolveTieGroupId: winner }),
+          body: JSON.stringify({ ...payload, resolveTieGroupId: winner }),
         });
         const retryData = await retry.json();
         if (!retry.ok) {
-          setError(retryData.error || "Reveal failed.");
+          setError(retryData.error || "Update failed.");
           return;
         }
       } else {
@@ -207,7 +211,7 @@ export default function OrganizerPage() {
         return;
       }
     }
-    setMessage(`Audience Choice voting → ${state}`);
+    setMessage(label);
     await loadAll();
   }
 
@@ -236,7 +240,7 @@ export default function OrganizerPage() {
   if (!authed) {
     return (
       <div className="page-shell staff-surface">
-        <SiteHeader />
+        <ClientSiteHeader />
         <div className="mx-auto max-w-lg px-4 py-8">
           <h1 className="brand-mark text-4xl text-[var(--red)]">Organizer</h1>
           <form onSubmit={login} className="panel mt-8 space-y-4 p-5">
@@ -278,7 +282,7 @@ export default function OrganizerPage() {
 
   return (
     <div className="page-shell staff-surface">
-      <SiteHeader />
+      <ClientSiteHeader />
       <div className="mx-auto max-w-5xl space-y-8 px-4 py-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -428,8 +432,8 @@ export default function OrganizerPage() {
             Christmas Group Talent Show
           </h2>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
-            Approve groups and set performance order. Approved groups become Audience
-            Choice candidates.
+            Approve groups and set performance order. Approved groups are the performing
+            acts (and later, when you reveal Audience Choice, the ballot).
           </p>
           <div className="mt-4 space-y-3">
             {(dash?.groups || []).map((g) => (
@@ -499,37 +503,102 @@ export default function OrganizerPage() {
         </section>
 
         <section className="panel p-5">
-          <h2 className="brand-mark text-2xl text-[var(--red)]">Audience Choice</h2>
+          <h2 className="brand-mark text-2xl text-[var(--red)]">Audience Choice (private)</h2>
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
-            Votes cast: {voting?.voteCount ?? 0}. Totals hidden until reveal.
+            Voting stays off public pages until you reveal it. Phase:{" "}
+            <strong>{voting?.publicPhase || "hidden"}</strong>. Votes cast:{" "}
+            {voting?.voteCount ?? 0}.
             {voting?.note ? ` ${voting.note}` : ""}
           </p>
           {typeof voting?.legacyKingQueenVoteCount === "number" &&
             voting.legacyKingQueenVoteCount > 0 && (
               <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                Archived King/Queen history rows retained: {voting.legacyKingQueenVoteCount}{" "}
-                (read-only; not used for Audience Choice).
+                Archived King/Queen history rows retained: {voting.legacyKingQueenVoteCount}.
               </p>
             )}
-          <p className="mt-2 text-sm font-semibold">
-            State: {voting?.talentVotingState || dash?.event.talentVotingState || "—"}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {["CLOSED", "OPEN", "REVEALED"].map((s) => (
-              <button
-                key={s}
-                type="button"
-                className="btn btn-secondary !min-h-10 !px-3 !text-sm"
-                onClick={() => setVoteState(s)}
-              >
-                {s}
-              </button>
-            ))}
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-[var(--red)]/10 p-3">
+              <p className="text-sm font-extrabold text-[var(--red)]">Visibility</p>
+              <p className="text-sm text-[var(--ink-soft)]">
+                {voting?.visibility || "HIDDEN"} (default hidden)
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                  onClick={() =>
+                    patchVoting({ visibility: "REVEALED" }, "Voting revealed to attendees")
+                  }
+                >
+                  Reveal to attendees
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger !min-h-10 !px-3 !text-sm"
+                  onClick={() =>
+                    patchVoting(
+                      { visibility: "HIDDEN", state: "CLOSED", resultsPublished: false },
+                      "Voting hidden from public",
+                    )
+                  }
+                >
+                  Hide again
+                </button>
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--red)]/10 p-3">
+              <p className="text-sm font-extrabold text-[var(--red)]">Voting status</p>
+              <p className="text-sm text-[var(--ink-soft)]">{voting?.talentVotingState || "CLOSED"}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary !min-h-10 !px-3 !text-sm"
+                  onClick={() => patchVoting({ state: "OPEN" }, "Voting opened")}
+                >
+                  Open voting
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                  onClick={() => patchVoting({ state: "CLOSED" }, "Voting closed")}
+                >
+                  Close voting
+                </button>
+              </div>
+            </div>
+            <div className="rounded-xl border border-[var(--red)]/10 p-3">
+              <p className="text-sm font-extrabold text-[var(--red)]">Results</p>
+              <p className="text-sm text-[var(--ink-soft)]">
+                Published publicly: {voting?.resultsPublished ? "yes" : "no"}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary !min-h-10 !px-3 !text-sm"
+                  onClick={() =>
+                    patchVoting({ resultsPublished: true }, "Audience Choice results published")
+                  }
+                >
+                  Publish results
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                  onClick={() =>
+                    patchVoting({ resultsPublished: false }, "Public results unpublished")
+                  }
+                >
+                  Unpublish
+                </button>
+              </div>
+            </div>
           </div>
-          {voting?.results && (
+          {voting?.privateResults && voting.privateResults.length > 0 && (
             <ul className="mt-4 space-y-1 text-sm">
-              <li className="font-extrabold text-[var(--green)]">Audience Choice results</li>
-              {voting.results.map((r) => (
+              <li className="font-extrabold text-[var(--green)]">
+                Private tallies (organizer only)
+              </li>
+              {voting.privateResults.map((r) => (
                 <li key={r.groupId}>
                   {r.groupName}: {r.votes}
                   <span className="ml-2 font-mono text-xs text-[var(--ink-soft)]">

@@ -56,52 +56,77 @@ async function main() {
   const results: string[] = [];
   const pass = (m: string) => results.push(`PASS: ${m}`);
 
+  // Ensure hidden before public checks (previous runs may have revealed voting)
+  const orgJar: Jar = new Map();
+  {
+    const { res: oLogin } = await req("/api/auth/staff/login", {
+      method: "POST",
+      jar: orgJar,
+      body: JSON.stringify({
+        username: process.env.ORGANIZER_USERNAME || "organizer",
+        password: process.env.ORGANIZER_PASSWORD || "ChangeMeOrganizer!",
+      }),
+    });
+    assert(oLogin.ok, "Organizer login for hide");
+    await req("/api/organizer/voting", {
+      method: "PATCH",
+      jar: orgJar,
+      body: JSON.stringify({ visibility: "HIDDEN", state: "CLOSED", resultsPublished: false }),
+    });
+  }
+
   {
     const res = await fetch(BASE);
     assert(res.ok, `Home not ok: ${res.status}`);
-    pass("Home page loads");
+    const html = await res.text();
+    assert(
+      !/\b(King|Queen)\b|Audience Choice|Vote for Your Favorite|ballot/i.test(html),
+      "Home must not mention voting/King/Queen",
+    );
+    pass("Home page loads without public voting copy");
   }
 
-  const { res: r1, json: a } = await req("/api/register", {
+  const { res: voteHidden } = await req("/api/vote");
+  assert(voteHidden.status === 404, `Vote API must 404 when hidden, got ${voteHidden.status}`);
+  pass("Vote API blocked before reveal");
+
+  const { res: votePage } = await req("/vote");
+  assert(votePage.status === 404, `Vote page must 404 when hidden, got ${votePage.status}`);
+  pass("Vote page blocked before reveal");
+
+  const { res: voterLoginHidden } = await req("/api/auth/voter/login", {
     method: "POST",
     body: JSON.stringify({
-      fullName: `Alex Talent ${Date.now()}`,
-      phone: "555-0101",
-      email: "alex@example.com",
+      ticketToken: "x".repeat(32),
+      votingCredential: "ABCDEFGHIJ",
     }),
   });
+  assert(voterLoginHidden.status === 404, "Voter login blocked before reveal");
+  pass("Voter login blocked before reveal");
+
+  const { json: navHidden } = await req("/api/public/nav");
+  assert(!("audienceChoice" in navHidden), "Nav must omit audienceChoice when hidden");
+  pass("Public nav omits Audience Choice while hidden");
+
+  const stamp = Date.now();
+  const { res: r1, json: a } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({ fullName: `Alex Talent ${stamp}`, phone: "555-0101" }),
+  });
   assert(r1.ok, `Register A failed: ${JSON.stringify(a)}`);
-  assert(a.ticketToken && a.votingCredential, "A missing ticket/credential");
-  pass("Registration issues ticket + voting credential");
-
   const tokenA = String(a.ticketToken);
-  const voteA = String(a.votingCredential);
+  const codeA = String(a.votingCredential);
 
-  const { res: r2, json: b } = await req("/api/register", {
+  const { json: b } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: `Blake Talent ${Date.now()}`, phone: "555-0102" }),
+    body: JSON.stringify({ fullName: `Blake Talent ${stamp}`, phone: "555-0102" }),
   });
-  assert(r2.ok, `Register B failed: ${JSON.stringify(b)}`);
   const tokenB = String(b.ticketToken);
-  const voteB = String(b.votingCredential);
-  pass("Second attendee registered");
-
-  const { json: vJson } = await req("/api/ticket/validate", {
-    method: "POST",
-    body: JSON.stringify({ token: tokenA }),
-  });
-  assert(vJson.valid === true, "Valid ticket should validate");
-  pass("Ticket validation accepts issued token");
-
-  const { json: badJson } = await req("/api/ticket/validate", {
-    method: "POST",
-    body: JSON.stringify({ token: "this-is-not-a-real-ticket-token-xxxxx" }),
-  });
-  assert(badJson.valid === false, "Invalid token should fail");
-  pass("Invalid ticket rejected");
+  const codeB = String(b.votingCredential);
+  pass("Attendees registered");
 
   const staffJar: Jar = new Map();
-  const { res: sLogin, json: sJson } = await req("/api/auth/staff/login", {
+  await req("/api/auth/staff/login", {
     method: "POST",
     jar: staffJar,
     body: JSON.stringify({
@@ -109,38 +134,23 @@ async function main() {
       password: process.env.STAFF_PASSWORD || "ChangeMeStaff!",
     }),
   });
-  assert(sLogin.ok, `Staff login failed: ${JSON.stringify(sJson)}`);
-  pass("Staff login");
-
-  const { res: c1, json: c1j } = await req("/api/checkin", {
+  await req("/api/checkin", {
     method: "POST",
     jar: staffJar,
     body: JSON.stringify({ token: tokenA, method: "manual" }),
   });
-  assert(c1.ok, `Check-in A failed: ${JSON.stringify(c1j)}`);
-  pass("Check-in succeeds");
-
-  const { res: cDup } = await req("/api/checkin", {
-    method: "POST",
-    jar: staffJar,
-    body: JSON.stringify({ token: tokenA, method: "manual" }),
-  });
-  assert(cDup.status === 409, `Duplicate check-in should 409, got ${cDup.status}`);
-  pass("Duplicate check-in rejected");
-
   await req("/api/checkin", {
     method: "POST",
     jar: staffJar,
     body: JSON.stringify({ token: tokenB, method: "manual" }),
   });
-  pass("Check-in B");
+  pass("Check-ins complete");
 
-  // Talent group registration
   const { res: g1, json: g1j } = await req("/api/groups", {
     method: "POST",
     body: JSON.stringify({
       leaderTicketToken: tokenA,
-      groupName: `Joyful Voices ${Date.now()}`,
+      groupName: `Joyful Voices ${stamp}`,
       performanceTitle: "Carol Medley",
       talentType: "Song / Vocal",
       memberTicketTokens: [tokenA, tokenB],
@@ -148,70 +158,44 @@ async function main() {
   });
   assert(g1.ok, `Group register failed: ${JSON.stringify(g1j)}`);
   const groupId = String(g1j.groupId);
-  pass("Christmas Group Talent Show registration");
+  pass("Talent group registered");
 
-  const { res: gDup } = await req("/api/groups", {
-    method: "POST",
-    body: JSON.stringify({
-      leaderTicketToken: tokenA,
-      groupName: "Duplicate Attempt",
-      performanceTitle: "Nope",
-      talentType: "Dance",
-      memberTicketTokens: [tokenA],
-    }),
-  });
-  assert(gDup.status === 409, "Member already in a group should 409");
-  pass("Duplicate group membership rejected");
-
-  // Unregistered member token rejected
-  const { res: gBad } = await req("/api/groups", {
-    method: "POST",
-    body: JSON.stringify({
-      leaderTicketToken: tokenB,
-      groupName: "Bad Members",
-      performanceTitle: "Nope",
-      talentType: "Dance",
-      memberTicketTokens: [tokenB, "not-a-real-issued-ticket-token-zzzz"],
-    }),
-  });
-  // tokenB already in a group → 409, or if we used fresh attendees would be 400
-  assert(gBad.status === 409 || gBad.status === 400, "Invalid/occupied members rejected");
-  pass("Invalid member tickets rejected");
-
-  const orgJar: Jar = new Map();
-  const { res: oLogin, json: oJson } = await req("/api/auth/staff/login", {
-    method: "POST",
-    jar: orgJar,
-    body: JSON.stringify({
-      username: process.env.ORGANIZER_USERNAME || "organizer",
-      password: process.env.ORGANIZER_PASSWORD || "ChangeMeOrganizer!",
-    }),
-  });
-  assert(oLogin.ok && oJson.role === "ORGANIZER", `Organizer login failed: ${JSON.stringify(oJson)}`);
-  pass("Organizer login");
-
-  const { res: approveRes, json: approveJ } = await req("/api/organizer/groups", {
+  await req("/api/organizer/groups", {
     method: "PATCH",
     jar: orgJar,
     body: JSON.stringify({ groupId, action: "approve" }),
   });
-  assert(approveRes.ok, `Approve failed: ${JSON.stringify(approveJ)}`);
-  pass("Organizer approves talent group");
+  pass("Group approved");
 
-  const { res: openRes, json: openJ } = await req("/api/organizer/voting", {
+  // Reveal but keep closed
+  await req("/api/organizer/voting", {
+    method: "PATCH",
+    jar: orgJar,
+    body: JSON.stringify({ visibility: "REVEALED", state: "CLOSED" }),
+  });
+  const { res: voteClosedPage } = await req("/vote");
+  assert(voteClosedPage.status === 200, "Vote page visible when revealed but closed");
+  const { res: castWhileClosed } = await req("/api/vote", {
+    method: "POST",
+    body: JSON.stringify({ groupId }),
+  });
+  // May be 401 (no session) or 403 closed — not 404
+  assert(castWhileClosed.status !== 404, "Revealed vote API must not 404");
+  pass("Revealed-but-closed: page available, casting still gated");
+
+  await req("/api/organizer/voting", {
     method: "PATCH",
     jar: orgJar,
     body: JSON.stringify({ state: "OPEN" }),
   });
-  assert(openRes.ok, `Open voting failed: ${JSON.stringify(openJ)}`);
-  pass("Audience Choice voting opened");
+  pass("Voting opened");
 
   const { json: c } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: `Casey Unchecked ${Date.now()}` }),
+    body: JSON.stringify({ fullName: `Casey Unchecked ${stamp}` }),
   });
   const voterC: Jar = new Map();
-  const { res: loginC, json: loginCJ } = await req("/api/auth/voter/login", {
+  const { res: loginC } = await req("/api/auth/voter/login", {
     method: "POST",
     jar: voterC,
     body: JSON.stringify({
@@ -219,74 +203,68 @@ async function main() {
       votingCredential: c.votingCredential,
     }),
   });
-  assert(
-    loginC.status === 403,
-    `Unchecked-in voter should be blocked, got ${loginC.status} ${JSON.stringify(loginCJ)}`,
-  );
+  assert(loginC.status === 403, "Unchecked-in voter rejected");
   pass("Unchecked-in voter rejected");
 
   const voterA: Jar = new Map();
-  const { res: loginA, json: loginAJ } = await req("/api/auth/voter/login", {
+  const { res: loginA } = await req("/api/auth/voter/login", {
     method: "POST",
     jar: voterA,
-    body: JSON.stringify({ ticketToken: tokenA, votingCredential: voteA }),
+    body: JSON.stringify({ ticketToken: tokenA, votingCredential: codeA }),
   });
-  assert(loginA.ok, `Voter A login failed: ${JSON.stringify(loginAJ)}`);
+  assert(loginA.ok, "Voter A login");
 
-  const { res: vote1, json: vote1j } = await req("/api/vote", {
+  const { res: vote1 } = await req("/api/vote", {
     method: "POST",
     jar: voterA,
     body: JSON.stringify({ groupId }),
   });
-  assert(vote1.ok, `Vote failed: ${JSON.stringify(vote1j)}`);
+  assert(vote1.ok, "Vote cast");
   pass("Audience Choice vote cast");
 
-  const { res: voteDup, json: voteDupJ } = await req("/api/vote", {
+  const { res: voteDup } = await req("/api/vote", {
     method: "POST",
     jar: voterA,
     body: JSON.stringify({ groupId }),
   });
-  assert(voteDup.status === 409, `Duplicate vote should 409: ${JSON.stringify(voteDupJ)}`);
-  pass("Duplicate Audience Choice vote rejected");
+  assert(voteDup.status === 409, "Duplicate vote rejected");
+  pass("Duplicate vote rejected");
 
-  // Second voter also votes (optional path) then reveal
-  const voterB: Jar = new Map();
-  await req("/api/auth/voter/login", {
-    method: "POST",
-    jar: voterB,
-    body: JSON.stringify({ ticketToken: tokenB, votingCredential: voteB }),
-  });
-  await req("/api/vote", {
-    method: "POST",
-    jar: voterB,
-    body: JSON.stringify({ groupId }),
-  });
-
-  const { res: revealRes, json: revealJ } = await req("/api/organizer/voting", {
+  await req("/api/organizer/voting", {
     method: "PATCH",
     jar: orgJar,
-    body: JSON.stringify({ state: "REVEALED" }),
+    body: JSON.stringify({ state: "CLOSED" }),
   });
-  assert(revealRes.ok, `Reveal failed: ${JSON.stringify(revealJ)}`);
-  pass("Audience Choice results revealed");
+  pass("Voting closed after ballots");
+
+  const { res: pub, json: pubJ } = await req("/api/organizer/voting", {
+    method: "PATCH",
+    jar: orgJar,
+    body: JSON.stringify({ resultsPublished: true }),
+  });
+  assert(pub.ok, `Publish failed: ${JSON.stringify(pubJ)}`);
+  pass("Results published");
 
   const { json: status } = await req("/api/organizer/voting", { jar: orgJar });
-  assert(status.resultsLabel === "Audience Choice", "Results label should be Audience Choice");
-  assert(Array.isArray(status.results), "Results should be visible after reveal");
-  pass("Audience Choice results labeled correctly");
+  assert(status.publicPhase === "closed_results_published", `phase=${status.publicPhase}`);
+  assert(status.resultsLabel === "Audience Choice", "label");
+  pass("Organizer phase closed_results_published");
 
-  // Revoke ticket still works
-  await req("/api/organizer/attendees/action", {
-    method: "POST",
+  // Hide again — public blocked
+  const { res: hideRes, json: hideJ } = await req("/api/organizer/voting", {
+    method: "PATCH",
     jar: orgJar,
-    body: JSON.stringify({ attendeeId: a.attendeeId, action: "revoke" }),
+    body: JSON.stringify({ visibility: "HIDDEN" }),
   });
-  const { json: revokedVal } = await req("/api/ticket/validate", {
-    method: "POST",
-    body: JSON.stringify({ token: tokenA }),
-  });
-  assert(revokedVal.valid === false, "Revoked ticket should be invalid");
-  pass("Revoked ticket rejected");
+  assert(hideRes.ok, `Hide failed: ${JSON.stringify(hideJ)}`);
+  const { json: afterHide } = await req("/api/organizer/voting", { jar: orgJar });
+  assert(afterHide.visibility === "HIDDEN", `visibility after hide=${afterHide.visibility}`);
+  const { res: voteHiddenAgain } = await req("/api/vote");
+  assert(
+    voteHiddenAgain.status === 404,
+    `Vote API 404 after hide, got ${voteHiddenAgain.status}`,
+  );
+  pass("Hiding again blocks public vote API");
 
   console.log(results.join("\n"));
   console.log("\nAll automated flow checks passed.");

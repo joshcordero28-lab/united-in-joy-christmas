@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { SiteHeader } from "@/components/SiteHeader";
+import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
 const TALENT_TYPES = [
@@ -69,16 +69,16 @@ export default function TalentShowRegisterPage() {
 
   return (
     <div className="page-shell">
-      <SiteHeader />
+      <ClientSiteHeader />
       <div className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
         <p className="script-mark text-2xl text-[var(--green)]">Sign up for the</p>
         <h1 className="brand-mark text-4xl text-[var(--red)] sm:text-5xl">
           Christmas Group Talent Show
         </h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Group leaders register the act. Every member must already be a registered
-          event attendee (use their ticket tokens). Organizers approve groups before
-          they appear on the Audience Choice ballot.
+          Group leaders register the act for this group performance competition.
+          Every member must already be a registered event attendee (use their ticket
+          tokens). Organizers approve groups and set the performance order.
         </p>
 
         <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">

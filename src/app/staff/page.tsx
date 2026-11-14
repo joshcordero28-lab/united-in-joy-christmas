@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { SiteHeader } from "@/components/SiteHeader";
+import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
 type StaffInfo = { role: string; displayName: string } | null;
@@ -111,7 +111,7 @@ export default function StaffPage() {
 
   return (
     <div className="page-shell staff-surface">
-      <SiteHeader />
+      <ClientSiteHeader />
       <div className="mx-auto max-w-lg px-4 py-8">
         <h1 className="brand-mark text-4xl text-[var(--red)]">Staff check-in</h1>
         <p className="mt-2 text-[var(--ink-soft)]">

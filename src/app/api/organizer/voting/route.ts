@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { VotingState } from "@prisma/client";
+import { VotingState, VotingVisibility } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getStaffSession, requireStaff } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
 import { writeAudit } from "@/lib/audit";
 
 const patchSchema = z.object({
-  state: z.nativeEnum(VotingState),
+  /// HIDDEN | REVEALED — whether attendees may access the ballot at all.
+  visibility: z.nativeEnum(VotingVisibility).optional(),
+  /// CLOSED | OPEN — whether votes are accepted (OPEN only meaningful when revealed).
+  state: z.enum(["CLOSED", "OPEN"]).optional(),
+  /// Publish Audience Choice tallies to attendees (requires visibility REVEALED).
+  resultsPublished: z.boolean().optional(),
   resolveTieGroupId: z.string().optional(),
 });
 
@@ -21,14 +26,10 @@ export async function GET() {
     }
 
     const event = await getEventConfig();
-    const includeTotals = event.talentVotingState === "REVEALED";
-
-    const tallies = includeTotals
-      ? await prisma.audienceVote.groupBy({
-          by: ["groupId"],
-          _count: { _all: true },
-        })
-      : [];
+    const tallies = await prisma.audienceVote.groupBy({
+      by: ["groupId"],
+      _count: { _all: true },
+    });
 
     const groups = await prisma.talentGroup.findMany({
       where: { status: "APPROVED" },
@@ -48,24 +49,36 @@ export async function GET() {
       }))
       .sort((a, b) => b.votes - a.votes);
 
-    const tie = detectTie(results);
-
-    const legacyCount = await prisma.legacyKingQueenVote.count();
-
     return NextResponse.json({
-      talentVotingState: event.talentVotingState,
+      visibility: event.talentVotingVisibility,
+      talentVotingState:
+        event.talentVotingState === "OPEN" ? "OPEN" : "CLOSED",
+      resultsPublished: event.talentResultsPublished,
       resultsLabel: "Audience Choice",
-      results: includeTotals ? results : null,
-      ties: includeTotals ? tie : null,
+      // Organizer always sees private tallies in dashboard (not public).
+      privateResults: results,
+      ties: detectTie(results),
       voteCount: await prisma.audienceVote.count(),
       approvedGroups: groups,
-      legacyKingQueenVoteCount: legacyCount,
-      note: "Audience Choice is the audience favorite poll — not declared as the overall talent-show winner unless organizers state that separately.",
+      legacyKingQueenVoteCount: await prisma.legacyKingQueenVote.count(),
+      publicPhase: describePhase(event),
+      note: "Audience Choice is separate from any judged overall talent-show winner unless you announce otherwise.",
     });
   } catch (err) {
     console.error("voting status failed", err);
     return NextResponse.json({ error: "Failed." }, { status: 500 });
   }
+}
+
+function describePhase(event: {
+  talentVotingVisibility: VotingVisibility;
+  talentVotingState: VotingState;
+  talentResultsPublished: boolean;
+}) {
+  if (event.talentVotingVisibility === "HIDDEN") return "hidden";
+  if (event.talentVotingState === "OPEN") return "open";
+  if (event.talentResultsPublished) return "closed_results_published";
+  return "revealed_but_closed";
 }
 
 function detectTie(rows: { groupId: string; groupName: string; votes: number }[]) {
@@ -91,7 +104,25 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Invalid request." }, { status: 400 });
     }
 
-    if (parsed.data.state === "REVEALED") {
+    const current = await getEventConfig();
+    const nextVisibility = parsed.data.visibility ?? current.talentVotingVisibility;
+    const nextState = parsed.data.state ?? (current.talentVotingState === "OPEN" ? "OPEN" : "CLOSED");
+    let nextResults =
+      parsed.data.resultsPublished ?? current.talentResultsPublished;
+
+    // Hiding from the public always unpublishes attendee-facing results first.
+    if (nextVisibility === "HIDDEN") {
+      nextResults = false;
+    }
+
+    if (nextResults && nextVisibility !== "REVEALED") {
+      return NextResponse.json(
+        { error: "Reveal voting to attendees before publishing results." },
+        { status: 400 },
+      );
+    }
+
+    if (parsed.data.resultsPublished === true) {
       const tallies = await prisma.audienceVote.groupBy({
         by: ["groupId"],
         _count: { _all: true },
@@ -123,22 +154,25 @@ export async function PATCH(request: Request) {
           action: "audience_vote.tie_resolved",
           entityType: "AudienceChoice",
           entityId: parsed.data.resolveTieGroupId,
-          detail: `winnerGroup=${parsed.data.resolveTieGroupId}`,
         });
       }
     }
 
     await prisma.eventConfig.update({
       where: { id: "default" },
-      data: { talentVotingState: parsed.data.state },
+      data: {
+        talentVotingVisibility: nextVisibility,
+        talentVotingState: nextState,
+        talentResultsPublished: nextResults,
+      },
     });
 
     await writeAudit({
       actorId: session.staffId,
       actorLabel: session.username,
-      action: "audience_vote.state_change",
+      action: "audience_vote.config_change",
       entityType: "AudienceChoice",
-      detail: `state=${parsed.data.state}`,
+      detail: `visibility=${nextVisibility}; state=${nextState}; resultsPublished=${nextResults}`,
     });
 
     return NextResponse.json({ ok: true });

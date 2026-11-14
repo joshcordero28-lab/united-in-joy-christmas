@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { SiteHeader } from "@/components/SiteHeader";
+import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
 type RegisterResult = {
@@ -54,12 +54,12 @@ export default function RegisterPage() {
 
   return (
     <div className="page-shell">
-      <SiteHeader />
+      <ClientSiteHeader />
       <div className="mx-auto w-full max-w-lg flex-1 px-4 py-8">
         <p className="script-mark text-2xl text-[var(--red)]">Join us</p>
         <h1 className="brand-mark text-4xl text-[var(--red)] sm:text-5xl">Register</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Get your QR ticket instantly. Keep the voting code private.
+          Get your QR ticket instantly. Save your private guest code with your ticket.
         </p>
 
         {!result ? (
@@ -102,10 +102,10 @@ export default function RegisterPage() {
             {result.ticketToken && (
               <>
                 <p className="text-sm text-[var(--ink-soft)]">
-                  Save your ticket link and voting code now — they are not emailed.
+                  Save your ticket link and private guest code now — they are not emailed.
                 </p>
                 <p className="rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-3 font-mono text-sm">
-                  Voting code: <strong className="text-[var(--red)]">{result.votingCredential}</strong>
+                  Guest code: <strong className="text-[var(--red)]">{result.votingCredential}</strong>
                 </p>
                 <Link
                   className="btn btn-primary w-full"

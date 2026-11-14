@@ -35,6 +35,12 @@ enum VotingState {
   REVEALED
 }
 
+/// Whether attendees may see the ballot at all (independent of open/closed).
+enum VotingVisibility {
+  HIDDEN
+  REVEALED
+}
+
 enum GroupStatus {
   PENDING
   APPROVED
@@ -43,23 +49,27 @@ enum GroupStatus {
 }
 
 model EventConfig {
-  id                        String      @id @default("default")
-  name                      String      @default("United in Joy Christmas 2026")
-  dateLabel                 String      @default("December 13, 2026")
-  venueLabel                String      @default("[VENUE — TBD]")
-  capacity                  Int         @default(200)
-  registrationOpen          Boolean     @default(true)
-  requireApproval           Boolean     @default(false)
-  votingEnabledAfterCheckIn Boolean     @default(true)
+  id                        String           @id @default("default")
+  name                      String           @default("United in Joy Christmas 2026")
+  dateLabel                 String           @default("December 13, 2026")
+  venueLabel                String           @default("[VENUE — TBD]")
+  capacity                  Int              @default(200)
+  registrationOpen          Boolean          @default(true)
+  requireApproval           Boolean          @default(false)
+  votingEnabledAfterCheckIn Boolean          @default(true)
   /// Deprecated: King/Queen self-vote toggle (legacy UI removed).
-  allowSelfVote             Boolean     @default(false)
+  allowSelfVote             Boolean          @default(false)
   /// Deprecated: retained for history; use talentVotingState.
-  kingVotingState           VotingState @default(CLOSED)
+  kingVotingState           VotingState      @default(CLOSED)
   /// Deprecated: retained for history; use talentVotingState.
-  queenVotingState          VotingState @default(CLOSED)
-  /// Audience Choice voting for Christmas Group Talent Show.
-  talentVotingState         VotingState @default(CLOSED)
-  updatedAt                 DateTime    @updatedAt
+  queenVotingState          VotingState      @default(CLOSED)
+  /// Audience Choice open/closed (OPEN accepts votes; CLOSED does not). Legacy REVEALED mapped to resultsPublished.
+  talentVotingState         VotingState      @default(CLOSED)
+  /// Default HIDDEN: public must not see voting UI/APIs until organizer reveals.
+  talentVotingVisibility    VotingVisibility @default(HIDDEN)
+  /// When true, Audience Choice tallies are shown publicly (separate from open/close).
+  talentResultsPublished    Boolean          @default(false)
+  updatedAt                 DateTime         @updatedAt
 }
 
 model StaffAccount {

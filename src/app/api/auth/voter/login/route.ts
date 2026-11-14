@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { verifyVotingCredential } from "@/lib/crypto";
 import { getVoterSession } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
+import { getPublicVotingGate } from "@/lib/voting-public";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 const schema = z.object({
@@ -14,6 +15,11 @@ const schema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const gate = await getPublicVotingGate();
+    if (!gate.visible) {
+      return NextResponse.json({ error: "Not found." }, { status: 404 });
+    }
+
     const ip = clientIp(request);
     const limited = await rateLimit(`voter-login:${ip}`, 15, 60_000);
     if (!limited.ok) {
@@ -35,12 +41,12 @@ export async function POST(request: Request) {
         : null;
 
     if (!attendee || attendee.status !== "ISSUED") {
-      return NextResponse.json({ error: "Ticket not valid for voting." }, { status: 401 });
+      return NextResponse.json({ error: "Invalid ticket." }, { status: 401 });
     }
 
     if (event.votingEnabledAfterCheckIn && !attendee.checkedInAt) {
       return NextResponse.json(
-        { error: "Check in at the entrance before voting." },
+        { error: "Check in at the entrance first." },
         { status: 403 },
       );
     }

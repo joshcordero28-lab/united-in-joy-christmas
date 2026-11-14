@@ -18,12 +18,15 @@ export async function GET(request: Request) {
   const status = searchParams.get("status");
   const forVoting = searchParams.get("forVoting") === "true";
 
+  // Ballot listing for attendees is only via /api/vote after reveal — never here.
+  if (forVoting) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+
   const groups = await prisma.talentGroup.findMany({
-    where: forVoting
-      ? { status: "APPROVED" }
-      : status
-        ? { status: status as "PENDING" | "APPROVED" | "REJECTED" | "WITHDRAWN" }
-        : undefined,
+    where: status
+      ? { status: status as "PENDING" | "APPROVED" | "REJECTED" | "WITHDRAWN" }
+      : { status: "APPROVED" },
     orderBy: [{ performanceOrder: "asc" }, { createdAt: "asc" }],
     include: {
       leader: { select: { id: true, fullName: true } },

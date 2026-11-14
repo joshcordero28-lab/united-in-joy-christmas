@@ -23,7 +23,7 @@ const body = Nunito_Sans({
 export const metadata: Metadata = {
   title: "United in Joy Christmas 2026",
   description:
-    "CCF Thailand — register for your QR ticket, join the Christmas Group Talent Show, and vote for your favorite group. December 13, 2026.",
+    "CCF Thailand — register for your QR ticket and join the Christmas Group Talent Show. December 13, 2026.",
 };
 
 export default function RootLayout({

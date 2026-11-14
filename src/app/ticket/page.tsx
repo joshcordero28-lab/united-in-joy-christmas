@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SiteHeader } from "@/components/SiteHeader";
+import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
 export default function TicketLookupPage() {
@@ -22,7 +22,7 @@ export default function TicketLookupPage() {
 
   return (
     <div className="page-shell">
-      <SiteHeader />
+      <ClientSiteHeader />
       <div className="mx-auto w-full max-w-lg flex-1 px-4 py-8">
         <h1 className="brand-mark text-4xl text-[var(--red)]">Open ticket</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
