@@ -1,6 +1,6 @@
-# United in Love Christmas Party
+# United in Joy Christmas 2026
 
-Standalone Next.js app for attendee registration, QR tickets, competition entry, staff check-in, and King/Queen voting — backed by shared Postgres.
+Standalone Next.js app for attendee registration, QR tickets, competition entry, staff check-in, and King/Queen voting — backed by shared Postgres. CCF Thailand branding (red / forest green / gold / cream ticket aesthetic).
 
 ## Quick start
 

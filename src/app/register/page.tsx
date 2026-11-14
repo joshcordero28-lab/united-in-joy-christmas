@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SiteFooter } from "@/components/SiteFooter";
 
 type RegisterResult = {
   attendeeId: string;
@@ -52,11 +53,12 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="min-h-screen">
+    <div className="page-shell">
       <SiteHeader />
-      <div className="mx-auto max-w-lg px-4 py-8">
-        <h1 className="brand-mark text-4xl text-[var(--gold-soft)]">Register</h1>
-        <p className="mt-2 text-[var(--cream)]/80">
+      <div className="mx-auto w-full max-w-lg flex-1 px-4 py-8">
+        <p className="script-mark text-2xl text-[var(--red)]">Join us</p>
+        <h1 className="brand-mark text-4xl text-[var(--red)] sm:text-5xl">Register</h1>
+        <p className="mt-2 text-[var(--ink-soft)]">
           Get your QR ticket instantly. Keep the voting code private.
         </p>
 
@@ -86,22 +88,24 @@ export default function RegisterPage() {
               </label>
               <textarea className="field min-h-24" id="notes" name="notes" />
             </div>
-            {error && <p className="text-[var(--berry-bright)]">{error}</p>}
+            {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" disabled={loading} type="submit">
               {loading ? "Registering…" : "Get my ticket"}
             </button>
           </form>
         ) : (
           <div className="panel mt-8 space-y-4 p-5">
-            <h2 className="brand-mark text-2xl text-[var(--gold)]">You&apos;re in, {result.fullName}!</h2>
-            <p>{result.message}</p>
+            <h2 className="brand-mark text-3xl text-[var(--red)]">
+              You&apos;re in, {result.fullName}!
+            </h2>
+            <p className="text-[var(--ink-soft)]">{result.message}</p>
             {result.ticketToken && (
               <>
-                <p className="text-sm text-[var(--cream)]/70">
+                <p className="text-sm text-[var(--ink-soft)]">
                   Save your ticket link and voting code now — they are not emailed.
                 </p>
-                <p className="rounded-xl bg-black/20 p-3 font-mono text-sm break-all">
-                  Voting code: <strong>{result.votingCredential}</strong>
+                <p className="rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-3 font-mono text-sm">
+                  Voting code: <strong className="text-[var(--red)]">{result.votingCredential}</strong>
                 </p>
                 <Link
                   className="btn btn-primary w-full"
@@ -114,6 +118,7 @@ export default function RegisterPage() {
           </div>
         )}
       </div>
-    </main>
+      <SiteFooter />
+    </div>
   );
 }

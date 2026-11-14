@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SiteFooter } from "@/components/SiteFooter";
 
 type Dashboard = {
   event: {
@@ -217,10 +218,10 @@ export default function OrganizerPage() {
 
   if (!authed) {
     return (
-      <main className="min-h-screen">
+      <div className="page-shell staff-surface">
         <SiteHeader />
         <div className="mx-auto max-w-lg px-4 py-8">
-          <h1 className="brand-mark text-4xl text-[var(--gold-soft)]">Organizer</h1>
+          <h1 className="brand-mark text-4xl text-[var(--red)]">Organizer</h1>
           <form onSubmit={login} className="panel mt-8 space-y-4 p-5">
             <div>
               <label className="label" htmlFor="username">
@@ -247,32 +248,33 @@ export default function OrganizerPage() {
                 required
               />
             </div>
-            {error && <p className="text-[var(--berry-bright)]">{error}</p>}
+            {error && <p className="text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" type="submit">
               Sign in
             </button>
           </form>
         </div>
-      </main>
+      <SiteFooter />
+    </div>
     );
   }
 
   return (
-    <main className="min-h-screen">
+    <div className="page-shell staff-surface">
       <SiteHeader />
       <div className="mx-auto max-w-5xl space-y-8 px-4 py-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h1 className="brand-mark text-4xl text-[var(--gold-soft)]">Dashboard</h1>
-            <p className="text-[var(--cream)]/75">{dash?.event.name}</p>
+            <h1 className="brand-mark text-4xl text-[var(--red)]">Dashboard</h1>
+            <p className="text-[var(--ink-soft)]">{dash?.event.name}</p>
           </div>
           <Link href="/staff" className="btn btn-secondary">
             Check-in desk
           </Link>
         </div>
 
-        {error && <p className="text-[var(--berry-bright)]">{error}</p>}
-        {message && <p className="text-[var(--gold)]">{message}</p>}
+        {error && <p className="text-[var(--red)]">{error}</p>}
+        {message && <p className="text-[var(--green)]">{message}</p>}
 
         <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {[
@@ -282,7 +284,7 @@ export default function OrganizerPage() {
             ["Votes", dash?.counts.votes],
           ].map(([label, value]) => (
             <div key={String(label)} className="panel p-4">
-              <p className="text-sm text-[var(--gold-soft)]">{label}</p>
+              <p className="text-sm text-[var(--red)]">{label}</p>
               <p className="brand-mark text-3xl">{value ?? "—"}</p>
             </div>
           ))}
@@ -382,7 +384,7 @@ export default function OrganizerPage() {
               >
                 <div>
                   <p className="font-semibold">{a.fullName}</p>
-                  <p className="text-sm text-[var(--cream)]/65">
+                  <p className="text-sm text-[var(--ink-soft)]">
                     {a.status}
                     {a.checkedInAt ? " · checked in" : ""}
                     {a.email ? ` · ${a.email}` : ""}
@@ -427,7 +429,7 @@ export default function OrganizerPage() {
               <div key={c.id} className="rounded-xl border border-white/10 p-3">
                 <p className="font-semibold">
                   {c.name}{" "}
-                  <span className="text-sm font-normal text-[var(--cream)]/65">
+                  <span className="text-sm font-normal text-[var(--ink-soft)]">
                     ({c.type}) {c.entryCount}
                     {c.maxEntries != null ? `/${c.maxEntries}` : ""}
                   </span>
@@ -439,7 +441,7 @@ export default function OrganizerPage() {
 
         <section className="panel p-5">
           <h2 className="brand-mark text-2xl">Voting controls</h2>
-          <p className="mt-1 text-sm text-[var(--cream)]/70">
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
             Votes cast — King: {voting?.voteCounts.KING ?? 0}, Queen:{" "}
             {voting?.voteCounts.QUEEN ?? 0}. Totals hidden until reveal.
           </p>
@@ -466,7 +468,7 @@ export default function OrganizerPage() {
                     {voting.results[cat]!.map((r) => (
                       <li key={r.nomineeId}>
                         {r.fullName}: {r.votes}
-                        <span className="ml-2 font-mono text-xs text-[var(--cream)]/45">
+                        <span className="ml-2 font-mono text-xs text-[var(--ink-soft)]">
                           {r.nomineeId}
                         </span>
                       </li>
@@ -484,17 +486,18 @@ export default function OrganizerPage() {
             {logs.map((l) => (
               <div key={l.id} className="border-b border-white/5 py-2">
                 <p>
-                  <span className="text-[var(--gold-soft)]">
+                  <span className="text-[var(--red)]">
                     {new Date(l.createdAt).toLocaleString()}
                   </span>{" "}
                   · {l.actorLabel || "system"} · {l.action}
                 </p>
-                {l.detail && <p className="text-[var(--cream)]/60">{l.detail}</p>}
+                {l.detail && <p className="text-[var(--ink-soft)]">{l.detail}</p>}
               </div>
             ))}
           </div>
         </section>
       </div>
-    </main>
+    <SiteFooter />
+    </div>
   );
 }

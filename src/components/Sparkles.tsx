@@ -1,10 +1,11 @@
 export function Sparkles() {
   const dots = [
-    { top: "8%", left: "12%", delay: "0s" },
+    { top: "10%", left: "14%", delay: "0s" },
     { top: "18%", left: "78%", delay: "0.6s" },
     { top: "42%", left: "88%", delay: "1.1s" },
-    { top: "70%", left: "8%", delay: "1.7s" },
-    { top: "28%", left: "40%", delay: "2.2s" },
+    { top: "68%", left: "10%", delay: "1.7s" },
+    { top: "30%", left: "48%", delay: "2.2s" },
+    { top: "55%", left: "62%", delay: "0.9s" },
   ];
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">

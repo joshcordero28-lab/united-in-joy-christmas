@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SiteFooter } from "@/components/SiteFooter";
 
 type Competition = {
   id: string;
@@ -53,11 +54,12 @@ export default function CompetitionsPage() {
   }
 
   return (
-    <main className="min-h-screen">
+    <div className="page-shell">
       <SiteHeader />
-      <div className="mx-auto max-w-2xl px-4 py-8">
-        <h1 className="brand-mark text-4xl text-[var(--gold-soft)]">Competitions</h1>
-        <p className="mt-2 text-[var(--cream)]/80">
+      <div className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
+        <p className="script-mark text-2xl text-[var(--green)]">Show your talent</p>
+        <h1 className="brand-mark text-4xl text-[var(--red)]">Competitions</h1>
+        <p className="mt-2 text-[var(--ink-soft)]">
           Enter with your ticket token. Team events need a team name.
         </p>
 
@@ -69,20 +71,20 @@ export default function CompetitionsPage() {
               onClick={() => setSelected(c.id)}
               className={`w-full rounded-2xl border px-4 py-4 text-left transition ${
                 selected === c.id
-                  ? "border-[var(--gold)] bg-[var(--gold)]/10"
-                  : "border-white/10 bg-white/5"
+                  ? "border-[var(--gold)] bg-[var(--gold)]/15 shadow-md"
+                  : "border-[var(--red)]/15 bg-white/70"
               }`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-lg font-semibold">{c.name}</p>
-                  <p className="text-sm text-[var(--cream)]/70">{c.description}</p>
+                  <p className="text-lg font-extrabold text-[var(--ink)]">{c.name}</p>
+                  <p className="text-sm text-[var(--ink-soft)]">{c.description}</p>
                 </div>
-                <span className="text-xs uppercase tracking-wide text-[var(--gold-soft)]">
+                <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
                   {c.type}
                 </span>
               </div>
-              <p className="mt-2 text-sm text-[var(--cream)]/60">
+              <p className="mt-2 text-sm text-[var(--ink-soft)]">
                 {c.entryCount}
                 {c.maxEntries != null ? ` / ${c.maxEntries}` : ""} entries
                 {!c.isOpen ? " · closed" : ""}
@@ -115,13 +117,14 @@ export default function CompetitionsPage() {
               onChange={(e) => setTeamName(e.target.value)}
             />
           </div>
-          {error && <p className="text-[var(--berry-bright)]">{error}</p>}
-          {message && <p className="text-[var(--gold)]">{message}</p>}
+          {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
+          {message && <p className="font-semibold text-[var(--green)]">{message}</p>}
           <button className="btn btn-primary w-full" type="submit" disabled={!selected}>
             Enter selected competition
           </button>
         </form>
       </div>
-    </main>
+      <SiteFooter />
+    </div>
   );
 }

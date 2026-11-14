@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SiteFooter } from "@/components/SiteFooter";
 
 export default function TicketLookupPage() {
   const router = useRouter();
@@ -20,11 +21,11 @@ export default function TicketLookupPage() {
   }
 
   return (
-    <main className="min-h-screen">
+    <div className="page-shell">
       <SiteHeader />
-      <div className="mx-auto max-w-lg px-4 py-8">
-        <h1 className="brand-mark text-4xl text-[var(--gold-soft)]">Open ticket</h1>
-        <p className="mt-2 text-[var(--cream)]/80">
+      <div className="mx-auto w-full max-w-lg flex-1 px-4 py-8">
+        <h1 className="brand-mark text-4xl text-[var(--red)]">Open ticket</h1>
+        <p className="mt-2 text-[var(--ink-soft)]">
           Paste your ticket token or open the link from registration.
         </p>
         <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
@@ -45,6 +46,7 @@ export default function TicketLookupPage() {
           </button>
         </form>
       </div>
-    </main>
+      <SiteFooter />
+    </div>
   );
 }

@@ -13,8 +13,8 @@ async function main() {
     where: { id: "default" },
     create: {
       id: "default",
-      name: "United in Love Christmas Party",
-      dateLabel: "[EVENT DATE — TBD]",
+      name: "United in Joy Christmas 2026",
+      dateLabel: "December 13, 2026",
       venueLabel: "[VENUE — TBD]",
       capacity: 200,
       registrationOpen: true,
@@ -22,7 +22,10 @@ async function main() {
       votingEnabledAfterCheckIn: true,
       allowSelfVote: false,
     },
-    update: {},
+    update: {
+      name: "United in Joy Christmas 2026",
+      dateLabel: "December 13, 2026",
+    },
   });
 
   const organizerHash = await bcrypt.hash(organizerPassword, 12);

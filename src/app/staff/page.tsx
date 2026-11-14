@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SiteFooter } from "@/components/SiteFooter";
 
 type StaffInfo = { role: string; displayName: string } | null;
 
@@ -109,11 +110,11 @@ export default function StaffPage() {
   }
 
   return (
-    <main className="min-h-screen">
+    <div className="page-shell staff-surface">
       <SiteHeader />
       <div className="mx-auto max-w-lg px-4 py-8">
-        <h1 className="brand-mark text-4xl text-[var(--gold-soft)]">Staff check-in</h1>
-        <p className="mt-2 text-[var(--cream)]/80">
+        <h1 className="brand-mark text-4xl text-[var(--red)]">Staff check-in</h1>
+        <p className="mt-2 text-[var(--ink-soft)]">
           Scan QR tickets or enter a token manually. Duplicate check-ins are blocked.
         </p>
 
@@ -146,7 +147,7 @@ export default function StaffPage() {
                 required
               />
             </div>
-            {error && <p className="text-[var(--berry-bright)]">{error}</p>}
+            {error && <p className="text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" type="submit">
               Sign in
             </button>
@@ -203,11 +204,12 @@ export default function StaffPage() {
               </button>
             )}
 
-            {error && <p className="text-[var(--berry-bright)]">{error}</p>}
-            {message && <p className="text-[var(--gold)]">{message}</p>}
+            {error && <p className="text-[var(--red)]">{error}</p>}
+            {message && <p className="text-[var(--green)]">{message}</p>}
           </div>
         )}
       </div>
-    </main>
+    <SiteFooter />
+    </div>
   );
 }

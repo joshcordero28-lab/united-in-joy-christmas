@@ -1,23 +1,29 @@
 import type { Metadata } from "next";
-import { Fraunces, Source_Sans_3 } from "next/font/google";
+import { Cormorant_Garamond, Great_Vibes, Nunito_Sans } from "next/font/google";
 import "./globals.css";
 
-const display = Fraunces({
+const display = Cormorant_Garamond({
   subsets: ["latin"],
   variable: "--font-display",
   weight: ["500", "600", "700"],
 });
 
-const body = Source_Sans_3({
+const script = Great_Vibes({
+  subsets: ["latin"],
+  variable: "--font-script",
+  weight: ["400"],
+});
+
+const body = Nunito_Sans({
   subsets: ["latin"],
   variable: "--font-body",
-  weight: ["400", "600", "700"],
+  weight: ["400", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
-  title: "United in Love Christmas Party",
+  title: "United in Joy Christmas 2026",
   description:
-    "Register, get your QR ticket, join competitions, and vote for King & Queen of the Night.",
+    "CCF Thailand — register for your QR ticket, join competitions, and vote for King & Queen of the Night. December 13, 2026.",
 };
 
 export default function RootLayout({
@@ -27,7 +33,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${display.variable} ${body.variable} antialiased`}>
+      <body className={`${display.variable} ${script.variable} ${body.variable} antialiased`}>
         {children}
       </body>
     </html>

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { SiteHeader } from "@/components/SiteHeader";
+import { SiteFooter } from "@/components/SiteFooter";
 
 type VoteState = {
   voter: { id: string; fullName: string };
@@ -74,11 +75,12 @@ export default function VotePage() {
   const votedQueen = state?.myVotes.find((v) => v.category === "QUEEN");
 
   return (
-    <main className="min-h-screen">
+    <div className="page-shell">
       <SiteHeader />
-      <div className="mx-auto max-w-2xl px-4 py-8">
-        <h1 className="brand-mark text-4xl text-[var(--gold-soft)]">King & Queen</h1>
-        <p className="mt-2 text-[var(--cream)]/80">
+      <div className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
+        <p className="script-mark text-2xl text-[var(--red)]">Crown the night</p>
+        <h1 className="brand-mark text-4xl text-[var(--red)]">King & Queen</h1>
+        <p className="mt-2 text-[var(--ink-soft)]">
           Vote once per category. Totals stay hidden until the organizer reveals them.
         </p>
 
@@ -108,7 +110,7 @@ export default function VotePage() {
                 required
               />
             </div>
-            {error && <p className="text-[var(--berry-bright)]">{error}</p>}
+            {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" type="submit">
               Enter voting
             </button>
@@ -116,13 +118,14 @@ export default function VotePage() {
         ) : (
           state && (
             <div className="mt-8 space-y-8">
-              <p className="text-[var(--gold)]">Signed in as {state.voter.fullName}</p>
-              {error && <p className="text-[var(--berry-bright)]">{error}</p>}
-              {message && <p className="text-[var(--gold)]">{message}</p>}
+              <p className="font-semibold text-[var(--green)]">
+                Signed in as {state.voter.fullName}
+              </p>
+              {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
+              {message && <p className="font-semibold text-[var(--green)]">{message}</p>}
 
               <CategoryBlock
                 title="King of the Night"
-                category="KING"
                 open={state.kingVotingState === "OPEN"}
                 stateLabel={state.kingVotingState}
                 voted={Boolean(votedKing)}
@@ -133,7 +136,6 @@ export default function VotePage() {
               />
               <CategoryBlock
                 title="Queen of the Night"
-                category="QUEEN"
                 open={state.queenVotingState === "OPEN"}
                 stateLabel={state.queenVotingState}
                 voted={Boolean(votedQueen)}
@@ -146,7 +148,8 @@ export default function VotePage() {
           )
         )}
       </div>
-    </main>
+      <SiteFooter />
+    </div>
   );
 }
 
@@ -159,7 +162,6 @@ function CategoryBlock({
   onVote,
 }: {
   title: string;
-  category: string;
   open: boolean;
   stateLabel: string;
   voted: boolean;
@@ -169,13 +171,15 @@ function CategoryBlock({
   return (
     <section className="panel p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="brand-mark text-2xl">{title}</h2>
-        <span className="text-xs uppercase tracking-wide text-[var(--gold-soft)]">
+        <h2 className="brand-mark text-2xl text-[var(--red)]">{title}</h2>
+        <span className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
           {stateLabel}
         </span>
       </div>
-      {!open && <p className="text-[var(--cream)]/70">Voting is not open for this category.</p>}
-      {open && voted && <p className="text-[var(--gold)]">Your vote is locked in.</p>}
+      {!open && <p className="text-[var(--ink-soft)]">Voting is not open for this category.</p>}
+      {open && voted && (
+        <p className="font-semibold text-[var(--green)]">Your vote is locked in.</p>
+      )}
       {open && !voted && (
         <div className="space-y-2">
           {nominees.map((n) => (
@@ -190,7 +194,7 @@ function CategoryBlock({
             </button>
           ))}
           {nominees.length === 0 && (
-            <p className="text-[var(--cream)]/70">No checked-in nominees yet.</p>
+            <p className="text-[var(--ink-soft)]">No checked-in nominees yet.</p>
           )}
         </div>
       )}

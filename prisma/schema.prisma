@@ -36,8 +36,8 @@ enum VotingState {
 
 model EventConfig {
   id                      String      @id @default("default")
-  name                    String      @default("United in Love Christmas Party")
-  dateLabel               String      @default("[EVENT DATE — TBD]")
+  name                    String      @default("United in Joy Christmas 2026")
+  dateLabel               String      @default("December 13, 2026")
   venueLabel              String      @default("[VENUE — TBD]")
   capacity                Int         @default(200)
   registrationOpen        Boolean     @default(true)
