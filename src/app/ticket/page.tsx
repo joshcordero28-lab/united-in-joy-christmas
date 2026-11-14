@@ -23,6 +23,11 @@ export default function TicketLookupPage() {
       ? decodeURIComponent(raw.split("/ticket/")[1] || "")
       : raw;
     if (!fromUrl) return;
+    try {
+      localStorage.setItem("uilc_ticket_token", fromUrl);
+    } catch {
+      // Ignore storage failures; ticket page still opens.
+    }
     router.push(`/ticket/${encodeURIComponent(fromUrl)}`);
   }
 

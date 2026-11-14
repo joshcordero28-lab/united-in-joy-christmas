@@ -7,6 +7,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
 import { CcfMark } from "@/components/CcfMark";
+import { RememberTicketToken } from "@/components/RememberTicketToken";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export default async function TicketPage({
 
   return (
     <div className="page-shell">
+      <RememberTicketToken token={token} />
       <SiteHeader compact />
       <div className="mx-auto w-full max-w-md flex-1 px-4 py-8">
         <div className="relative">

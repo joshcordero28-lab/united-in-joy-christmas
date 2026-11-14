@@ -158,10 +158,11 @@ export default function TalentShowRegisterPage() {
 
         {!leader ? (
           <div className="panel mt-8 space-y-3 p-5">
-            <p className="font-semibold text-[var(--red)]">Start from your entry ticket</p>
+            <p className="font-semibold text-[var(--red)]">No password login here</p>
             <p className="text-sm text-[var(--ink-soft)]">
-              Open your QR ticket on this phone first (from registration). We&apos;ll
-              recognize you as the group leader — no need to paste ticket links.
+              Talent signup uses your <strong>entry ticket</strong> on this phone — not a
+              staff username. Register (or open your ticket link), then return here. We&apos;ll
+              recognize you as the group leader automatically.
             </p>
             <Link href="/ticket" className="btn btn-primary w-full">
               Open my entry ticket
@@ -169,6 +170,13 @@ export default function TalentShowRegisterPage() {
             <Link href="/register" className="btn btn-secondary w-full">
               Register for a ticket
             </Link>
+            <p className="text-center text-xs text-[var(--ink-soft)]">
+              Organizer / check-in staff: use{" "}
+              <Link href="/staff" className="font-semibold text-[var(--red)] underline">
+                /staff
+              </Link>{" "}
+              instead.
+            </p>
           </div>
         ) : (
           <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
