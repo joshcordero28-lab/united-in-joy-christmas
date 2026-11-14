@@ -452,6 +452,20 @@ async function main() {
   });
   pass("Voting opened");
 
+  {
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient();
+    await prisma.rateLimitBucket.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: "register:" } },
+          { id: { startsWith: "register-day:" } },
+          { id: { startsWith: "register-seats:" } },
+        ],
+      },
+    });
+    await prisma.$disconnect();
+  }
   const { res: regC, json: c } = await req("/api/register", {
     method: "POST",
     body: JSON.stringify({ fullName: `Casey Unchecked ${stamp}` }),
