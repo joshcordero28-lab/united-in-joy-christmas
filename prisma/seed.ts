@@ -14,6 +14,13 @@ function requireEnv(name: string): string {
 }
 
 async function main() {
+  const sessionSecret = requireEnv("SESSION_SECRET");
+  if (sessionSecret.length < 32) {
+    throw new Error(
+      "SESSION_SECRET must be at least 32 characters (iron-session requirement).",
+    );
+  }
+
   const organizerPassword = requireEnv("ORGANIZER_PASSWORD");
   const staffPassword = requireEnv("STAFF_PASSWORD");
   const organizerUsername = requireEnv("ORGANIZER_USERNAME");

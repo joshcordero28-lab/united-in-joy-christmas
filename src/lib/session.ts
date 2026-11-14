@@ -16,10 +16,19 @@ export type VoterSessionData = {
   isLoggedIn?: boolean;
 };
 
+export class SessionConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SessionConfigError";
+  }
+}
+
 function sessionPassword(): string {
-  const secret = process.env.SESSION_SECRET;
+  const secret = process.env.SESSION_SECRET?.trim();
   if (!secret || secret.length < 32) {
-    throw new Error("SESSION_SECRET must be at least 32 characters");
+    throw new SessionConfigError(
+      "SESSION_SECRET must be at least 32 characters. Update it in Cursor Secrets, then republish.",
+    );
   }
   return secret;
 }

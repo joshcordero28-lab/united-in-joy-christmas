@@ -20,43 +20,48 @@ export async function rateLimit(
 ): Promise<RateLimitResult> {
   const now = new Date();
 
-  return prisma.$transaction(async (tx) => {
-    const existing = await tx.$queryRaw<BucketRow[]>`
-      SELECT id, count, "windowStart"
-      FROM "RateLimitBucket"
-      WHERE id = ${key}
-      FOR UPDATE
-    `;
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const existing = await tx.$queryRaw<BucketRow[]>`
+        SELECT id, count, "windowStart"
+        FROM "RateLimitBucket"
+        WHERE id = ${key}
+        FOR UPDATE
+      `;
 
-    const bucket = existing[0];
-    const windowExpired =
-      !bucket || now.getTime() - new Date(bucket.windowStart).getTime() >= windowMs;
+      const bucket = existing[0];
+      const windowExpired =
+        !bucket || now.getTime() - new Date(bucket.windowStart).getTime() >= windowMs;
 
-    if (windowExpired) {
-      await tx.rateLimitBucket.upsert({
+      if (windowExpired) {
+        await tx.rateLimitBucket.upsert({
+          where: { id: key },
+          create: { id: key, count: 1, windowStart: now },
+          update: { count: 1, windowStart: now },
+        });
+        return { ok: true as const };
+      }
+
+      if (bucket.count >= limit) {
+        const retryAfterSeconds = Math.ceil(
+          (windowMs - (now.getTime() - new Date(bucket.windowStart).getTime())) / 1000,
+        );
+        return {
+          ok: false as const,
+          retryAfterSeconds: Math.max(retryAfterSeconds, 1),
+        };
+      }
+
+      await tx.rateLimitBucket.update({
         where: { id: key },
-        create: { id: key, count: 1, windowStart: now },
-        update: { count: 1, windowStart: now },
+        data: { count: { increment: 1 } },
       });
       return { ok: true as const };
-    }
-
-    if (bucket.count >= limit) {
-      const retryAfterSeconds = Math.ceil(
-        (windowMs - (now.getTime() - new Date(bucket.windowStart).getTime())) / 1000,
-      );
-      return {
-        ok: false as const,
-        retryAfterSeconds: Math.max(retryAfterSeconds, 1),
-      };
-    }
-
-    await tx.rateLimitBucket.update({
-      where: { id: key },
-      data: { count: { increment: 1 } },
     });
+  } catch (err) {
+    console.error("rateLimit failed; allowing request", err);
     return { ok: true as const };
-  });
+  }
 }
 
 /**
