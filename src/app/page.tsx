@@ -56,7 +56,7 @@ export default async function HomePage() {
 
       <section className="relative w-full overflow-hidden bg-[var(--cream)]">
         <Image
-          src="/brand/united-in-joy-banner-prizes.jpg"
+          src="/brand/united-in-joy-banner-v2.jpg"
           alt="United in Joy Christmas 2026 — Win Exciting PRIZES! A gathering of thanksgiving and celebration"
           width={1350}
           height={1080}
