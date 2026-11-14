@@ -15,6 +15,38 @@ export function manageUrl(baseUrl: string, managerToken: string): string {
   return `${base}/manage#${encodeURIComponent(managerToken)}`;
 }
 
+/**
+ * Parse an app ticket credential from QR text, hash link, legacy path, or opaque code.
+ * Never fetches remote URLs. Absolute http(s) URLs must target this app's ticket route
+ * (host matches APP_BASE_URL when set).
+ */
+export function parseAppTicketCredential(input: string): string {
+  const raw = input.trim();
+  if (!raw) return "";
+
+  const looksAbsolute = /^https?:\/\//i.test(raw) || raw.startsWith("//");
+  if (looksAbsolute) {
+    try {
+      const u = new URL(raw.startsWith("//") ? `https:${raw}` : raw);
+      const base = (process.env.APP_BASE_URL || "").trim();
+      if (base) {
+        const allowed = new URL(base);
+        if (u.host !== allowed.host) {
+          return "";
+        }
+      }
+      const path = u.pathname.replace(/\/$/, "");
+      if (!(path.endsWith("/ticket") || path.includes("/ticket/"))) {
+        return "";
+      }
+    } catch {
+      return "";
+    }
+  }
+
+  return extractTicketToken(raw);
+}
+
 /** Accept a full ticket URL (hash or legacy path) or the opaque ticket code itself. */
 export function extractTicketToken(input: string): string {
   const raw = input.trim();

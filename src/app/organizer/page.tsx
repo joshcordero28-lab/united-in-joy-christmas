@@ -35,6 +35,16 @@ type Dashboard = {
     performanceOrder: number | null;
     memberCount: number;
     leaderName: string;
+    hasIneligibleMembers?: boolean;
+    needsVerificationReview?: boolean;
+    members?: {
+      id: string;
+      fullName: string;
+      status: string;
+      verifiedViaTicket?: boolean;
+      ineligible?: boolean;
+      needsVerification?: boolean;
+    }[];
   }[];
 };
 
@@ -485,6 +495,25 @@ export default function OrganizerPage() {
                     <p className="text-xs text-[var(--ink-soft)]">
                       {g.talentType} · leader {g.leaderName} · {g.memberCount} members
                     </p>
+                    {(g.hasIneligibleMembers || g.needsVerificationReview) && (
+                      <p className="mt-1 text-xs font-semibold text-[var(--red)]">
+                        {g.hasIneligibleMembers ? "Flagged: member cancelled/ineligible. " : ""}
+                        {g.needsVerificationReview
+                          ? "Legacy entry — ticket verification review recommended."
+                          : ""}
+                      </p>
+                    )}
+                    {g.members && g.members.length > 0 && (
+                      <ul className="mt-2 space-y-0.5 text-xs text-[var(--ink-soft)]">
+                        {g.members.map((m) => (
+                          <li key={m.id}>
+                            {m.fullName} · {m.status}
+                            {m.verifiedViaTicket === false ? " · needs verification" : " · ticket-linked"}
+                            {m.ineligible ? " · ineligible" : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <p className="mt-1 font-mono text-[0.65rem] text-[var(--ink-soft)]">
                       {g.id}
                     </p>

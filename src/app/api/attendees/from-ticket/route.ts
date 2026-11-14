@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
-import { extractTicketToken } from "@/lib/tickets";
+import { verifyAttendeeTicket } from "@/lib/ticket-verify";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 const schema = z.object({
@@ -23,22 +22,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid request." }, { status: 400 });
     }
 
-    const token = extractTicketToken(parsed.data.ticket);
-    if (token.length < 16) {
-      return NextResponse.json({ error: "Ticket not found." }, { status: 404 });
-    }
-
-    const attendee = await prisma.attendee.findUnique({
-      where: { ticketToken: token },
-      select: { id: true, fullName: true, status: true },
-    });
-    if (!attendee || attendee.status !== "ISSUED") {
-      return NextResponse.json({ error: "Ticket not found." }, { status: 404 });
+    const result = await verifyAttendeeTicket(parsed.data.ticket, { includeParty: false });
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error, code: result.code, registerUrl: result.registerUrl },
+        { status: result.status === 400 ? 404 : result.status },
+      );
     }
 
     return NextResponse.json({
-      id: attendee.id,
-      fullName: attendee.fullName,
+      id: result.attendee.id,
+      fullName: result.attendee.fullName,
     });
   } catch (err) {
     console.error("from-ticket failed", err);

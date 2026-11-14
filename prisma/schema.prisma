@@ -213,6 +213,8 @@ model TalentGroupMember {
   id         String   @id @default(cuid())
   groupId    String
   attendeeId String
+  /// False for pre-verification legacy rows — organizers should review, not delete.
+  verifiedViaTicket Boolean @default(true)
   createdAt  DateTime @default(now())
 
   group    TalentGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)

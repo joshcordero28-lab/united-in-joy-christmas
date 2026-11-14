@@ -1,9 +1,27 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { GroupStatus } from "@prisma/client";
+import { GroupStatus, TicketStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getStaffSession, requireStaff } from "@/lib/session";
 import { writeAudit } from "@/lib/audit";
+
+function memberFlags(attendee: {
+  status: TicketStatus;
+  id: string;
+}, verifiedViaTicket: boolean) {
+  const eligible = attendee.status === TicketStatus.ISSUED;
+  const reasons: string[] = [];
+  if (attendee.status === TicketStatus.REVOKED) reasons.push("cancelled");
+  if (attendee.status === TicketStatus.PENDING) reasons.push("pending approval");
+  if (!verifiedViaTicket) reasons.push("legacy — needs verification review");
+  return {
+    eligible,
+    verifiedViaTicket,
+    needsVerification: !verifiedViaTicket,
+    ineligible: !eligible,
+    flags: reasons,
+  };
+}
 
 export async function GET() {
   try {
@@ -17,30 +35,43 @@ export async function GET() {
     const groups = await prisma.talentGroup.findMany({
       orderBy: [{ performanceOrder: "asc" }, { createdAt: "asc" }],
       include: {
-        leader: { select: { id: true, fullName: true } },
+        leader: { select: { id: true, fullName: true, status: true } },
         members: {
-          include: { attendee: { select: { id: true, fullName: true } } },
+          include: {
+            attendee: { select: { id: true, fullName: true, status: true } },
+          },
         },
         _count: { select: { votes: true } },
       },
     });
 
     return NextResponse.json({
-      groups: groups.map((g) => ({
-        id: g.id,
-        groupName: g.groupName,
-        performanceTitle: g.performanceTitle,
-        talentType: g.talentType,
-        status: g.status,
-        performanceOrder: g.performanceOrder,
-        rejectionNote: g.rejectionNote,
-        leader: g.leader,
-        members: g.members.map((m) => ({
-          id: m.attendee.id,
-          fullName: m.attendee.fullName,
-        })),
-        voteCountHidden: true,
-      })),
+      groups: groups.map((g) => {
+        const members = g.members.map((m) => {
+          const flags = memberFlags(m.attendee, m.verifiedViaTicket);
+          return {
+            id: m.attendee.id,
+            fullName: m.attendee.fullName,
+            status: m.attendee.status,
+            isLeader: m.attendee.id === g.leaderAttendeeId,
+            ...flags,
+          };
+        });
+        return {
+          id: g.id,
+          groupName: g.groupName,
+          performanceTitle: g.performanceTitle,
+          talentType: g.talentType,
+          status: g.status,
+          performanceOrder: g.performanceOrder,
+          rejectionNote: g.rejectionNote,
+          leader: g.leader,
+          members,
+          hasIneligibleMembers: members.some((m) => m.ineligible),
+          needsVerificationReview: members.some((m) => m.needsVerification),
+          voteCountHidden: true,
+        };
+      }),
     });
   } catch (err) {
     console.error("organizer groups list failed", err);

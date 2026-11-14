@@ -53,7 +53,7 @@ function resolveNames(data: z.infer<typeof schema>): {
 export async function POST(request: Request) {
   try {
     const ip = clientIp(request);
-    const limited = await rateLimit(`register:${ip}`, 10, 60_000);
+    const limited = await rateLimit(`register:${ip}`, 40, 60_000);
     if (!limited.ok) {
       return NextResponse.json(
         { error: "Too many registration attempts. Please wait and try again." },

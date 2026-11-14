@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
+import { TicketVerifyPanel, VerifiedAttendee } from "@/components/TicketVerifyPanel";
 
 const TALENT_TYPES = [
   "Song / Vocal",
@@ -17,56 +18,50 @@ const TALENT_TYPES = [
 const MAX_MEMBERS = 3;
 const MAX_PARTNERS = MAX_MEMBERS - 1;
 
-type Person = {
-  id: string;
-  fullName: string;
-};
+type Partner =
+  | { source: "party"; id: string; fullName: string }
+  | { source: "ticket"; id: string; fullName: string; ticket: string };
 
 export default function TalentShowRegisterPage() {
+  const [savedTicket, setSavedTicket] = useState("");
   const [leaderTicket, setLeaderTicket] = useState("");
-  const [leader, setLeader] = useState<Person | null>(null);
-  const [partnerTickets, setPartnerTickets] = useState<string[]>([""]);
+  const [leader, setLeader] = useState<VerifiedAttendee | null>(null);
+  const [partyAttendees, setPartyAttendees] = useState<{ id: string; fullName: string }[]>([]);
+  const [selectedPartyIds, setSelectedPartyIds] = useState<string[]>([]);
+  const [ticketPartners, setTicketPartners] = useState<Partner[]>([]);
   const [groupName, setGroupName] = useState("");
   const [performanceTitle, setPerformanceTitle] = useState("");
   const [talentType, setTalentType] = useState(TALENT_TYPES[0]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [addingPartner, setAddingPartner] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("uilc_ticket_token") || "";
-    setLeaderTicket(saved);
-    if (!saved) return;
-    fetch("/api/attendees/from-ticket", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticket: saved }),
-    })
-      .then((r) => r.json().then((d) => ({ ok: r.ok, d })))
-      .then(({ ok, d }) => {
-        if (!ok) return;
-        setLeader({ id: d.id as string, fullName: d.fullName as string });
-      })
-      .catch(() => undefined);
+    setSavedTicket(localStorage.getItem("uilc_ticket_token") || "");
   }, []);
 
-  function updatePartnerTicket(index: number, value: string) {
-    setPartnerTickets((prev) => prev.map((t, i) => (i === index ? value : t)));
-  }
+  const partnerCount = selectedPartyIds.length + ticketPartners.length;
+  const slotsLeft = MAX_PARTNERS - partnerCount;
 
-  function addPartnerSlot() {
+  function togglePartyMember(id: string) {
     setError(null);
-    setPartnerTickets((prev) => {
-      if (prev.length >= MAX_PARTNERS) {
+    setSelectedPartyIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length + ticketPartners.length >= MAX_PARTNERS) {
         setError(`Groups are limited to ${MAX_MEMBERS} members (including you).`);
         return prev;
       }
-      return [...prev, ""];
+      return [...prev, id];
     });
   }
 
-  function removePartnerSlot(index: number) {
-    setPartnerTickets((prev) => prev.filter((_, i) => i !== index));
+  function clearLeader() {
+    setLeader(null);
+    setLeaderTicket("");
+    setPartyAttendees([]);
+    setSelectedPartyIds([]);
+    setTicketPartners([]);
   }
 
   async function onSubmit(e: FormEvent) {
@@ -74,12 +69,10 @@ export default function TalentShowRegisterPage() {
     setMessage(null);
     setError(null);
     if (!leader || !leaderTicket) {
-      setError("Open your entry ticket on this phone first, then come back here.");
+      setError("Verify the group leader with an event ticket first.");
       return;
     }
-
-    const partners = partnerTickets.map((t) => t.trim()).filter(Boolean);
-    if (partners.length > MAX_PARTNERS) {
+    if (partnerCount > MAX_PARTNERS) {
       setError(`Choose up to ${MAX_PARTNERS} partners (you count as one).`);
       return;
     }
@@ -94,7 +87,10 @@ export default function TalentShowRegisterPage() {
           performanceTitle,
           talentType,
           leaderTicket,
-          partnerTickets: partners,
+          partnerAttendeeIds: selectedPartyIds,
+          partnerTickets: ticketPartners
+            .filter((p): p is Extract<Partner, { source: "ticket" }> => p.source === "ticket")
+            .map((p) => p.ticket),
         }),
       });
       const data = await res.json();
@@ -121,136 +117,209 @@ export default function TalentShowRegisterPage() {
           Christmas Group Talent Show
         </h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Register a group performance act of up to <strong>{MAX_MEMBERS} people</strong>.
-          Partners join by sharing their own entry ticket link — that proves consent. You
-          (the leader) count as one of the {MAX_MEMBERS}.
+          Only registered event attendees can enter. Verify each performer’s entry ticket
+          (camera, QR image, or ticket code). Groups are up to <strong>{MAX_MEMBERS} people</strong>
+          — the leader counts as one. Event check-in is not required.
         </p>
 
-        {!leader ? (
-          <div className="panel mt-8 space-y-3 p-5">
-            <p className="font-semibold text-[var(--red)]">No password login here</p>
-            <p className="text-sm text-[var(--ink-soft)]">
-              Talent signup uses your <strong>entry ticket</strong> on this phone — not a
-              staff username. Register (or open your ticket link), then return here. We&apos;ll
-              recognize you as the group leader automatically.
-            </p>
-            <Link href="/ticket" className="btn btn-primary w-full">
-              Open my entry ticket
-            </Link>
-            <Link href="/register" className="btn btn-secondary w-full">
-              Register for a ticket
-            </Link>
-            <p className="text-center text-xs text-[var(--ink-soft)]">
-              Organizer / check-in staff: use{" "}
-              <Link href="/staff" className="font-semibold text-[var(--red)] underline">
-                /staff
-              </Link>{" "}
-              instead.
-            </p>
-          </div>
-        ) : (
-          <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
-            <div className="rounded-xl border border-[var(--green)]/30 bg-[var(--green)]/5 p-3">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
-                Group leader
-              </p>
-              <p className="font-extrabold text-[var(--ink)]">{leader.fullName}</p>
-              <p className="text-xs text-[var(--ink-soft)]">
-                Detected from your entry ticket on this device. You count as 1 of{" "}
-                {MAX_MEMBERS} members.
-              </p>
-            </div>
+        <div className="mt-8 space-y-4">
+          <TicketVerifyPanel
+            title="1. Verify group leader"
+            hint="Scan or enter the leader’s event ticket. This does not check anyone in."
+            includeParty
+            initialTicket={savedTicket}
+            verifiedLabel={leader?.fullName || null}
+            onVerified={({ ticket, attendee, partyAttendees: mates }) => {
+              setLeaderTicket(ticket);
+              setLeader(attendee);
+              setPartyAttendees(mates);
+              setSelectedPartyIds([]);
+              setTicketPartners([]);
+              setError(null);
+              localStorage.setItem("uilc_ticket_token", ticket);
+            }}
+            onClear={clearLeader}
+          />
 
-            <div>
-              <label className="label" htmlFor="groupName">
-                Group name *
-              </label>
-              <input
-                id="groupName"
-                className="field"
-                value={groupName}
-                onChange={(e) => setGroupName(e.target.value)}
-                required
-                minLength={2}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="performanceTitle">
-                Performance title *
-              </label>
-              <input
-                id="performanceTitle"
-                className="field"
-                value={performanceTitle}
-                onChange={(e) => setPerformanceTitle(e.target.value)}
-                required
-                minLength={2}
-              />
-            </div>
-            <div>
-              <label className="label" htmlFor="talentType">
-                Talent type *
-              </label>
-              <select
-                id="talentType"
-                className="field"
-                value={talentType}
-                onChange={(e) => setTalentType(e.target.value)}
-              >
-                {TALENT_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {!leader && (
+            <p className="text-center text-sm text-[var(--ink-soft)]">
+              Not registered yet?{" "}
+              <Link href="/register" className="font-semibold text-[var(--red)] underline">
+                Register for the event
+              </Link>
+            </p>
+          )}
 
-            <div>
-              <p className="label">Partners (optional, up to {MAX_PARTNERS})</p>
-              <p className="mb-2 text-xs text-[var(--ink-soft)]">
-                Ask each partner to open their ticket and share the ticket link with you.
-                Paste those links below — we do not add people by name search alone.
-              </p>
-              <ul className="space-y-2">
-                {partnerTickets.map((ticket, index) => (
-                  <li key={index} className="flex gap-2">
-                    <input
-                      className="field flex-1"
-                      value={ticket}
-                      onChange={(e) => updatePartnerTicket(index, e.target.value)}
-                      placeholder="Partner ticket link or code"
-                      autoComplete="off"
-                    />
-                    {partnerTickets.length > 1 && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary !min-h-10 !px-3 !text-sm"
-                        onClick={() => removePartnerSlot(index)}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              {partnerTickets.length < MAX_PARTNERS && (
-                <button
-                  type="button"
-                  className="btn btn-secondary mt-2 w-full"
-                  onClick={addPartnerSlot}
+          {leader && (
+            <form onSubmit={onSubmit} className="panel space-y-4 p-5">
+              <div className="rounded-xl border border-[var(--green)]/30 bg-[var(--green)]/5 p-3">
+                <p className="text-xs font-extrabold uppercase tracking-wide text-[var(--green)]">
+                  Group leader
+                </p>
+                <p className="font-extrabold text-[var(--ink)]">{leader.fullName}</p>
+                <p className="text-xs text-[var(--ink-soft)]">
+                  Ticket verified · you count as 1 of {MAX_MEMBERS} · check-in not required
+                </p>
+              </div>
+
+              <div>
+                <label className="label" htmlFor="groupName">
+                  Group name *
+                </label>
+                <input
+                  id="groupName"
+                  className="field"
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  required
+                  minLength={2}
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="performanceTitle">
+                  Performance title *
+                </label>
+                <input
+                  id="performanceTitle"
+                  className="field"
+                  value={performanceTitle}
+                  onChange={(e) => setPerformanceTitle(e.target.value)}
+                  required
+                  minLength={2}
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="talentType">
+                  Talent type *
+                </label>
+                <select
+                  id="talentType"
+                  className="field"
+                  value={talentType}
+                  onChange={(e) => setTalentType(e.target.value)}
                 >
-                  Add another partner ticket
-                </button>
-              )}
-            </div>
+                  {TALENT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
-            {message && <p className="font-semibold text-[var(--green)]">{message}</p>}
-            <button className="btn btn-primary w-full" type="submit" disabled={loading}>
-              {loading ? "Submitting…" : "Register group"}
-            </button>
-          </form>
-        )}
+              <div className="space-y-3">
+                <p className="label">Partners (optional, up to {MAX_PARTNERS})</p>
+                <p className="text-xs text-[var(--ink-soft)]">
+                  Names alone are not enough — every partner must be a registered attendee.
+                  People on your same registration can be selected below; others need their own
+                  ticket verified.
+                </p>
+
+                {partyAttendees.length > 0 && (
+                  <ul className="space-y-2">
+                    {partyAttendees.map((p) => {
+                      const checked = selectedPartyIds.includes(p.id);
+                      const disabled = !checked && slotsLeft <= 0;
+                      return (
+                        <li key={p.id}>
+                          <label
+                            className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm ${
+                              checked
+                                ? "border-[var(--green)] bg-[var(--green)]/5"
+                                : "border-[var(--red)]/10"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={() => togglePartyMember(p.id)}
+                            />
+                            <span>
+                              {p.fullName}
+                              <span className="ml-1 text-xs text-[var(--ink-soft)]">
+                                (same registration)
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+
+                {ticketPartners.length > 0 && (
+                  <ul className="space-y-2">
+                    {ticketPartners.map((p) => (
+                      <li
+                        key={p.id}
+                        className="flex items-center justify-between gap-2 rounded-xl border border-[var(--green)]/30 bg-[var(--green)]/5 px-3 py-2 text-sm"
+                      >
+                        <span className="font-semibold">{p.fullName}</span>
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-[var(--red)] underline"
+                          onClick={() =>
+                            setTicketPartners((prev) => prev.filter((x) => x.id !== p.id))
+                          }
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {slotsLeft > 0 && !addingPartner && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary w-full"
+                    onClick={() => setAddingPartner(true)}
+                  >
+                    Verify another partner’s ticket
+                  </button>
+                )}
+
+                {slotsLeft > 0 && addingPartner && (
+                  <TicketVerifyPanel
+                    title="Verify partner ticket"
+                    hint="Scan or enter this partner’s own entry ticket."
+                    onVerified={({ ticket, attendee }) => {
+                      if (attendee.id === leader.id) {
+                        setError("That is the leader’s ticket — choose a different partner.");
+                        return;
+                      }
+                      if (
+                        selectedPartyIds.includes(attendee.id) ||
+                        ticketPartners.some((p) => p.id === attendee.id)
+                      ) {
+                        setError("That attendee is already in this group.");
+                        return;
+                      }
+                      setTicketPartners((prev) => [
+                        ...prev,
+                        {
+                          source: "ticket",
+                          id: attendee.id,
+                          fullName: attendee.fullName,
+                          ticket,
+                        },
+                      ]);
+                      setAddingPartner(false);
+                      setError(null);
+                    }}
+                    onClear={() => setAddingPartner(false)}
+                  />
+                )}
+              </div>
+
+              {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
+              {message && <p className="font-semibold text-[var(--green)]">{message}</p>}
+              <button className="btn btn-primary w-full" type="submit" disabled={loading}>
+                {loading ? "Submitting…" : "Register group"}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
       <SiteFooter />
     </div>
