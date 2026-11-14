@@ -43,43 +43,67 @@ export async function POST(request: Request) {
     }
 
     const event = await getEventConfig();
-    const voter = await prisma.attendee.findUnique({ where: { id: session.attendeeId } });
-    if (!voter || voter.status !== "ISSUED") {
-      return NextResponse.json({ error: "Voter ticket invalid." }, { status: 403 });
-    }
-    if (event.votingEnabledAfterCheckIn && !voter.checkedInAt) {
-      return NextResponse.json({ error: "Check-in required before voting." }, { status: 403 });
-    }
-
-    const group = await prisma.talentGroup.findUnique({
-      where: { id: parsed.data.groupId },
-    });
-    if (!group || group.status !== "APPROVED") {
-      return NextResponse.json(
-        { error: "You can only vote for an approved performing group." },
-        { status: 400 },
-      );
-    }
 
     try {
-      const vote = await prisma.audienceVote.create({
-        data: {
-          voterId: voter.id,
+      const result = await prisma.$transaction(async (tx) => {
+        const voter = await tx.attendee.findUnique({ where: { id: session.attendeeId } });
+        if (!voter || voter.status !== "ISSUED") {
+          return { status: 403 as const, error: "Voter ticket invalid." };
+        }
+        if (event.votingEnabledAfterCheckIn && !voter.checkedInAt) {
+          return { status: 403 as const, error: "Check-in required before voting." };
+        }
+
+        const group = await tx.talentGroup.findUnique({
+          where: { id: parsed.data.groupId },
+        });
+        if (!group || group.status !== "APPROVED") {
+          return {
+            status: 400 as const,
+            error: "You can only vote for an approved performing group.",
+          };
+        }
+
+        // Re-check status immediately before insert so soft-remove wins races.
+        const stillIssued = await tx.attendee.findFirst({
+          where: { id: voter.id, status: "ISSUED" },
+          select: { id: true, fullName: true },
+        });
+        if (!stillIssued) {
+          return { status: 403 as const, error: "Voter ticket invalid." };
+        }
+
+        const vote = await tx.audienceVote.create({
+          data: {
+            voterId: voter.id,
+            groupId: group.id,
+            castBy: VoteCastBy.SELF,
+            castByPartyId: null,
+          },
+        });
+
+        return {
+          status: 200 as const,
+          voteId: vote.id,
           groupId: group.id,
-          castBy: VoteCastBy.SELF,
-          castByPartyId: null,
-        },
+          groupName: group.groupName,
+          voterName: stillIssued.fullName,
+        };
       });
+
+      if (result.status !== 200) {
+        return NextResponse.json({ error: result.error }, { status: result.status });
+      }
 
       await writeAudit({
-        actorLabel: voter.fullName,
+        actorLabel: result.voterName,
         action: "audience_vote.cast",
         entityType: "AudienceVote",
-        entityId: vote.id,
-        detail: `group=${group.groupName};by=SELF`,
+        entityId: result.voteId,
+        detail: `group=${result.groupName};by=SELF`,
       });
 
-      return NextResponse.json({ ok: true, groupId: group.id });
+      return NextResponse.json({ ok: true, groupId: result.groupId });
     } catch (e: unknown) {
       const code = typeof e === "object" && e && "code" in e ? (e as { code: string }).code : "";
       if (code === "P2002") {
@@ -105,10 +129,18 @@ export async function GET() {
     return NextResponse.json({ error: "Voting login required." }, { status: 401 });
   }
 
-  const myVote = await prisma.audienceVote.findUnique({
+  const myVoteRow = await prisma.audienceVote.findUnique({
     where: { voterId: session.attendeeId },
-    select: { groupId: true, createdAt: true, castBy: true },
+    select: { groupId: true, createdAt: true, castBy: true, voidedAt: true },
   });
+  const myVote =
+    myVoteRow && !myVoteRow.voidedAt
+      ? {
+          groupId: myVoteRow.groupId,
+          createdAt: myVoteRow.createdAt,
+          castBy: myVoteRow.castBy,
+        }
+      : null;
 
   const groups = await prisma.talentGroup.findMany({
     where: { status: "APPROVED" },
@@ -126,6 +158,7 @@ export async function GET() {
   if (gate.resultsPublished) {
     const tallies = await prisma.audienceVote.groupBy({
       by: ["groupId"],
+      where: { voidedAt: null },
       _count: { _all: true },
     });
     const nameById = Object.fromEntries(groups.map((g) => [g.id, g.groupName]));

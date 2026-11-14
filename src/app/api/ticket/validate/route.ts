@@ -54,10 +54,30 @@ export async function POST(request: Request) {
       });
     }
 
+    if (attendee.status === "REMOVED") {
+      return NextResponse.json({
+        valid: false,
+        error: "Ticket removed.",
+        attendeeId: attendee.id,
+        fullName: attendee.fullName,
+        status: attendee.status,
+      });
+    }
+
     if (attendee.status === "PENDING") {
       return NextResponse.json({
         valid: false,
         error: "Ticket not yet issued.",
+        attendeeId: attendee.id,
+        fullName: attendee.fullName,
+        status: attendee.status,
+      });
+    }
+
+    if (attendee.status !== "ISSUED") {
+      return NextResponse.json({
+        valid: false,
+        error: "Ticket not valid.",
         attendeeId: attendee.id,
         fullName: attendee.fullName,
         status: attendee.status,

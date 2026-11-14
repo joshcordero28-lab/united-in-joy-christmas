@@ -46,6 +46,7 @@ export async function summarizePartyEntitlements(
           groupId: true,
           castBy: true,
           createdAt: true,
+          voidedAt: true,
           group: { select: { groupName: true } },
         },
       },
@@ -56,20 +57,26 @@ export async function summarizePartyEntitlements(
     attendeeIsEligible(a, votingEnabledAfterCheckIn),
   );
 
-  const usedVotes = eligiblePool.flatMap((a) =>
-    a.audienceVotes.map((v) => ({
-      attendeeId: a.id,
-      fullName: a.fullName,
-      groupId: v.groupId,
-      groupName: v.group.groupName,
-      castBy: v.castBy,
-      createdAt: v.createdAt,
-    })),
+  // Any ballot row (including voided) consumes the entitlement — restore must not mint extras.
+  const consumedIds = new Set(
+    eligiblePool.filter((a) => a.audienceVotes.length > 0).map((a) => a.id),
   );
 
-  const usedIds = new Set(usedVotes.map((v) => v.attendeeId));
+  const usedVotes = eligiblePool.flatMap((a) =>
+    a.audienceVotes
+      .filter((v) => !v.voidedAt)
+      .map((v) => ({
+        attendeeId: a.id,
+        fullName: a.fullName,
+        groupId: v.groupId,
+        groupName: v.group.groupName,
+        castBy: v.castBy,
+        createdAt: v.createdAt,
+      })),
+  );
+
   const remainingAttendees = eligiblePool
-    .filter((a) => !usedIds.has(a.id))
+    .filter((a) => !consumedIds.has(a.id))
     .map((a) => ({
       id: a.id,
       fullName: a.fullName,
@@ -78,7 +85,7 @@ export async function summarizePartyEntitlements(
 
   return {
     eligible: eligiblePool.length,
-    used: usedVotes.length,
+    used: consumedIds.size,
     remaining: remainingAttendees.length,
     remainingAttendees,
     usedVotes,

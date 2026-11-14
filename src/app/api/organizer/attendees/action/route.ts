@@ -35,6 +35,15 @@ export async function POST(request: Request) {
     if (!attendee) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
     }
+    if (attendee.status === "REMOVED") {
+      return NextResponse.json(
+        {
+          error:
+            "This attendee was soft-removed. Use Restore (not approve/revoke/reissue) to bring them back.",
+        },
+        { status: 409 },
+      );
+    }
 
     let votingCredential: string | null = null;
     let ticketToken: string | null = null;

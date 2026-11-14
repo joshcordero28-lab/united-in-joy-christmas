@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { getStaffSession, requireStaff } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
 import { writeAudit } from "@/lib/audit";
+import { activeVoteWhere, countActiveVotes } from "@/lib/attendee-removal";
 
 const patchSchema = z.object({
   /// HIDDEN | REVEALED — whether attendees may access the ballot at all.
@@ -14,6 +15,8 @@ const patchSchema = z.object({
   /// Publish Audience Choice tallies to attendees (requires visibility REVEALED).
   resultsPublished: z.boolean().optional(),
   resolveTieGroupId: z.string().optional(),
+  /// Clear correction-pending after organizer reviews voided-ballot impact.
+  acknowledgeResultsCorrection: z.boolean().optional(),
 });
 
 export async function GET() {
@@ -28,6 +31,7 @@ export async function GET() {
     const event = await getEventConfig();
     const tallies = await prisma.audienceVote.groupBy({
       by: ["groupId"],
+      where: activeVoteWhere(),
       _count: { _all: true },
     });
 
@@ -56,6 +60,8 @@ export async function GET() {
         id: true,
         castBy: true,
         createdAt: true,
+        voidedAt: true,
+        voidedReason: true,
         voter: { select: { fullName: true, registrationPartyId: true } },
         group: { select: { groupName: true } },
         castByParty: { select: { managerName: true } },
@@ -67,11 +73,15 @@ export async function GET() {
       talentVotingState:
         event.talentVotingState === "OPEN" ? "OPEN" : "CLOSED",
       resultsPublished: event.talentResultsPublished,
+      resultsCorrectionPending: event.talentResultsCorrectionPending,
       resultsLabel: "Audience Choice",
       // Organizer always sees private tallies in dashboard (not public).
       privateResults: results,
       ties: detectTie(results),
-      voteCount: await prisma.audienceVote.count(),
+      voteCount: await countActiveVotes(),
+      voidedVoteCount: await prisma.audienceVote.count({
+        where: { voidedAt: { not: null } },
+      }),
       approvedGroups: groups,
       ballotAudit: recentVotes.map((v) => ({
         id: v.id,
@@ -81,6 +91,8 @@ export async function GET() {
         managerName: v.castByParty?.managerName || null,
         partyId: v.voter.registrationPartyId,
         createdAt: v.createdAt,
+        voidedAt: v.voidedAt,
+        voidedReason: v.voidedReason,
       })),
       legacyKingQueenVoteCount: await prisma.legacyKingQueenVote.count(),
       publicPhase: describePhase(event),
@@ -96,7 +108,9 @@ function describePhase(event: {
   talentVotingVisibility: VotingVisibility;
   talentVotingState: VotingState;
   talentResultsPublished: boolean;
+  talentResultsCorrectionPending?: boolean;
 }) {
+  if (event.talentResultsCorrectionPending) return "results_correction_pending";
   if (event.talentVotingVisibility === "HIDDEN") return "hidden";
   if (event.talentVotingState === "OPEN") return "open";
   if (event.talentResultsPublished) return "closed_results_published";
@@ -147,6 +161,7 @@ export async function PATCH(request: Request) {
     if (parsed.data.resultsPublished === true) {
       const tallies = await prisma.audienceVote.groupBy({
         by: ["groupId"],
+        where: activeVoteWhere(),
         _count: { _all: true },
       });
       const sorted = [...tallies].sort((a, b) => b._count._all - a._count._all);
@@ -180,12 +195,17 @@ export async function PATCH(request: Request) {
       }
     }
 
+    const clearCorrection =
+      parsed.data.acknowledgeResultsCorrection === true ||
+      parsed.data.resultsPublished === true;
+
     await prisma.eventConfig.update({
       where: { id: "default" },
       data: {
         talentVotingVisibility: nextVisibility,
         talentVotingState: nextState,
         talentResultsPublished: nextResults,
+        ...(clearCorrection ? { talentResultsCorrectionPending: false } : {}),
       },
     });
 
@@ -194,7 +214,7 @@ export async function PATCH(request: Request) {
       actorLabel: session.username,
       action: "audience_vote.config_change",
       entityType: "AudienceChoice",
-      detail: `visibility=${nextVisibility}; state=${nextState}; resultsPublished=${nextResults}`,
+      detail: `visibility=${nextVisibility}; state=${nextState}; resultsPublished=${nextResults}; correctionCleared=${clearCorrection}`,
     });
 
     return NextResponse.json({ ok: true });

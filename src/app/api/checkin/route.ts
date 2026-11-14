@@ -43,8 +43,14 @@ export async function POST(request: Request) {
       if (attendee.status === "REVOKED") {
         return { status: 403 as const, error: "Ticket revoked.", attendee };
       }
+      if (attendee.status === "REMOVED") {
+        return { status: 403 as const, error: "Ticket removed.", attendee };
+      }
       if (attendee.status === "PENDING") {
         return { status: 403 as const, error: "Ticket not yet issued.", attendee };
+      }
+      if (attendee.status !== "ISSUED") {
+        return { status: 403 as const, error: "Ticket not valid for check-in.", attendee };
       }
       if (attendee.checkedInAt) {
         return {
@@ -55,14 +61,36 @@ export async function POST(request: Request) {
         };
       }
 
-      const updated = await tx.attendee.update({
-        where: { id: attendee.id },
+      // Atomic with soft-remove: only ISSUED + not yet checked in may succeed.
+      const updatedRows = await tx.attendee.updateMany({
+        where: {
+          id: attendee.id,
+          status: "ISSUED",
+          checkedInAt: null,
+        },
         data: {
           checkedInAt: new Date(),
           checkedInById: session.staffId,
           checkInMethod: parsed.data.method,
         },
       });
+      if (updatedRows.count !== 1) {
+        const latest = await tx.attendee.findUnique({ where: { id: attendee.id } });
+        if (latest?.status === "REMOVED") {
+          return { status: 403 as const, error: "Ticket removed.", attendee: latest };
+        }
+        if (latest?.checkedInAt) {
+          return {
+            status: 409 as const,
+            error: "Already checked in.",
+            attendee: latest,
+            checkedInAt: latest.checkedInAt,
+          };
+        }
+        return { status: 409 as const, error: "Check-in conflict. Retry.", attendee: latest || attendee };
+      }
+
+      const updated = await tx.attendee.findUniqueOrThrow({ where: { id: attendee.id } });
 
       await tx.checkInEvent.create({
         data: {

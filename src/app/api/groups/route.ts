@@ -161,6 +161,13 @@ export async function POST(request: Request) {
           registerUrl: "/register" as const,
         };
       }
+      if (leader.status === TicketStatus.REMOVED) {
+        return {
+          status: 403 as const,
+          error: "This registration was removed and cannot lead a talent group.",
+          registerUrl: "/register" as const,
+        };
+      }
       if (leader.status === TicketStatus.REVOKED) {
         return {
           status: 403 as const,
