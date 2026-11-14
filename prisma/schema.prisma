@@ -48,6 +48,11 @@ enum GroupStatus {
   WITHDRAWN
 }
 
+enum VoteCastBy {
+  SELF
+  MANAGER
+}
+
 model EventConfig {
   id                        String           @id @default("default")
   name                      String           @default("United in Joy Christmas 2026")
@@ -82,6 +87,25 @@ model StaffAccount {
   auditLogs    AuditLog[]
 }
 
+/// One registration submission (primary contact / manager) covering one or more attendees.
+model RegistrationParty {
+  id            String   @id @default(cuid())
+  /// Display name of the person who manages this registration.
+  managerName   String
+  contactPhone  String?
+  contactEmail  String?
+  notes         String?
+  /// Opaque private credential for the management page (never a ticket QR).
+  managerToken  String   @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  attendees Attendee[]
+  votesCast AudienceVote[] @relation("ManagerCastVotes")
+
+  @@index([createdAt])
+}
+
 model Attendee {
   id                   String       @id @default(cuid())
   fullName             String
@@ -98,9 +122,12 @@ model Attendee {
   checkedInAt          DateTime?
   checkedInById        String?
   checkInMethod        String?
+  /// Party this attendee belongs to (solo registrations are parties of one).
+  registrationPartyId  String
   createdAt            DateTime     @default(now())
   updatedAt            DateTime     @updatedAt
 
+  registrationParty  RegistrationParty     @relation(fields: [registrationPartyId], references: [id], onDelete: Restrict)
   competitionEntries CompetitionEntry[]
   /// Archived King/Queen votes cast by this attendee (read-only history).
   legacyVotesCast    LegacyKingQueenVote[] @relation("LegacyVoter")
@@ -109,11 +136,13 @@ model Attendee {
   checkInEvents      CheckInEvent[]
   groupsLed          TalentGroup[]         @relation("GroupLeader")
   groupMemberships   TalentGroupMember[]
+  /// Vote entitlement consumed for this attendee (at most one).
   audienceVotes      AudienceVote[]
 
   @@index([fullName])
   @@index([status])
   @@index([checkedInAt])
+  @@index([registrationPartyId])
 }
 
 model Competition {
@@ -146,12 +175,12 @@ model CompetitionEntry {
 
 /// Archived copy of King/Queen Vote rows. Original "Vote" table data is migrated here; never delete.
 model LegacyKingQueenVote {
-  id        String       @id
-  category  VoteCategory
-  voterId   String
-  nomineeId String
-  createdAt DateTime
-  archivedAt DateTime    @default(now())
+  id         String       @id
+  category   VoteCategory
+  voterId    String
+  nomineeId  String
+  createdAt  DateTime
+  archivedAt DateTime     @default(now())
 
   voter   Attendee @relation("LegacyVoter", fields: [voterId], references: [id], onDelete: Restrict)
   nominee Attendee @relation("LegacyNominee", fields: [nomineeId], references: [id], onDelete: Restrict)
@@ -161,16 +190,16 @@ model LegacyKingQueenVote {
 }
 
 model TalentGroup {
-  id                String      @id @default(cuid())
-  groupName         String
-  performanceTitle  String
-  talentType        String
-  leaderAttendeeId  String
-  status            GroupStatus @default(PENDING)
-  performanceOrder  Int?
-  rejectionNote     String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  id               String      @id @default(cuid())
+  groupName        String
+  performanceTitle String
+  talentType       String
+  leaderAttendeeId String
+  status           GroupStatus @default(PENDING)
+  performanceOrder Int?
+  rejectionNote    String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
   leader  Attendee            @relation("GroupLeader", fields: [leaderAttendeeId], references: [id], onDelete: Restrict)
   members TalentGroupMember[]
@@ -184,6 +213,8 @@ model TalentGroupMember {
   id         String   @id @default(cuid())
   groupId    String
   attendeeId String
+  /// False for pre-verification legacy rows — organizers should review, not delete.
+  verifiedViaTicket Boolean @default(true)
   createdAt  DateTime @default(now())
 
   group    TalentGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -195,17 +226,23 @@ model TalentGroupMember {
   @@index([groupId])
 }
 
-/// One Audience Choice vote per checked-in attendee for one approved group.
+/// One Audience Choice vote per entitlement attendee for one approved group.
 model AudienceVote {
-  id        String   @id @default(cuid())
-  voterId   String   @unique
-  groupId   String
-  createdAt DateTime @default(now())
+  id            String     @id @default(cuid())
+  /// The attendee whose check-in entitlement this vote consumes (unique).
+  voterId       String     @unique
+  groupId       String
+  castBy        VoteCastBy @default(SELF)
+  /// When castBy=MANAGER, the registration party that submitted the ballot.
+  castByPartyId String?
+  createdAt     DateTime   @default(now())
 
-  voter Attendee    @relation(fields: [voterId], references: [id], onDelete: Cascade)
-  group TalentGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  voter       Attendee           @relation(fields: [voterId], references: [id], onDelete: Cascade)
+  group       TalentGroup        @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  castByParty RegistrationParty? @relation("ManagerCastVotes", fields: [castByPartyId], references: [id], onDelete: SetNull)
 
   @@index([groupId])
+  @@index([castByPartyId])
 }
 
 model CheckInEvent {

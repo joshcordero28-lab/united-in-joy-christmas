@@ -37,7 +37,12 @@ export async function GET() {
       orderBy: [{ performanceOrder: "asc" }, { createdAt: "asc" }],
       include: {
         _count: { select: { members: true } },
-        leader: { select: { fullName: true } },
+        leader: { select: { fullName: true, status: true } },
+        members: {
+          include: {
+            attendee: { select: { id: true, fullName: true, status: true } },
+          },
+        },
       },
     });
 
@@ -54,16 +59,29 @@ export async function GET() {
         votes: voteCount,
         capacity: event.capacity,
       },
-      groups: groups.map((g) => ({
-        id: g.id,
-        groupName: g.groupName,
-        performanceTitle: g.performanceTitle,
-        talentType: g.talentType,
-        status: g.status,
-        performanceOrder: g.performanceOrder,
-        memberCount: g._count.members,
-        leaderName: g.leader.fullName,
-      })),
+      groups: groups.map((g) => {
+        const members = g.members.map((m) => ({
+          id: m.attendee.id,
+          fullName: m.attendee.fullName,
+          status: m.attendee.status,
+          verifiedViaTicket: m.verifiedViaTicket,
+          ineligible: m.attendee.status !== "ISSUED",
+          needsVerification: !m.verifiedViaTicket,
+        }));
+        return {
+          id: g.id,
+          groupName: g.groupName,
+          performanceTitle: g.performanceTitle,
+          talentType: g.talentType,
+          status: g.status,
+          performanceOrder: g.performanceOrder,
+          memberCount: g._count.members,
+          leaderName: g.leader.fullName,
+          members,
+          hasIneligibleMembers: members.some((m) => m.ineligible),
+          needsVerificationReview: members.some((m) => m.needsVerification),
+        };
+      }),
       staff: {
         displayName: session.displayName,
         role: session.role,

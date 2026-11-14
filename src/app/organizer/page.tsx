@@ -35,6 +35,16 @@ type Dashboard = {
     performanceOrder: number | null;
     memberCount: number;
     leaderName: string;
+    hasIneligibleMembers?: boolean;
+    needsVerificationReview?: boolean;
+    members?: {
+      id: string;
+      fullName: string;
+      status: string;
+      verifiedViaTicket?: boolean;
+      ineligible?: boolean;
+      needsVerification?: boolean;
+    }[];
   }[];
 };
 
@@ -45,6 +55,14 @@ type Attendee = {
   email: string | null;
   status: string;
   checkedInAt: string | null;
+  partyId?: string;
+  managerName?: string;
+  partyEligible?: number;
+  partyUsed?: number;
+  partyRemaining?: number;
+  partyAttendeeCount?: number;
+  voteCastBy?: string | null;
+  voteGroupName?: string | null;
 };
 
 type VotingInfo = {
@@ -55,6 +73,14 @@ type VotingInfo = {
   privateResults: { groupId: string; groupName: string; performanceTitle: string; votes: number }[];
   ties: null | { groupId: string; groupName: string; votes: number }[];
   voteCount: number;
+  ballotAudit?: {
+    id: string;
+    attendeeName: string;
+    groupName: string;
+    castBy: string;
+    managerName: string | null;
+    createdAt: string;
+  }[];
   publicPhase?: string;
   legacyKingQueenVoteCount?: number;
   note?: string;
@@ -368,6 +394,9 @@ export default function OrganizerPage() {
               <a className="btn btn-secondary" href="/api/organizer/export?type=audit">
                 Audit CSV
               </a>
+              <a className="btn btn-secondary" href="/api/organizer/export?type=votes">
+                Votes CSV
+              </a>
             </div>
           </div>
           <div className="mt-4 flex gap-2">
@@ -393,6 +422,18 @@ export default function OrganizerPage() {
                     {a.status}
                     {a.checkedInAt ? " · checked in" : ""}
                     {a.email ? ` · ${a.email}` : ""}
+                  </p>
+                  <p className="text-xs text-[var(--ink-soft)]">
+                    Manager {a.managerName || "—"}
+                    {a.partyAttendeeCount != null
+                      ? ` · party of ${a.partyAttendeeCount}`
+                      : ""}
+                    {typeof a.partyEligible === "number"
+                      ? ` · votes ${a.partyUsed ?? 0}/${a.partyEligible} used (${a.partyRemaining ?? 0} left)`
+                      : ""}
+                    {a.voteGroupName
+                      ? ` · ballot: ${a.voteGroupName} (${a.voteCastBy === "MANAGER" ? "manager" : "self"})`
+                      : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -454,6 +495,25 @@ export default function OrganizerPage() {
                     <p className="text-xs text-[var(--ink-soft)]">
                       {g.talentType} · leader {g.leaderName} · {g.memberCount} members
                     </p>
+                    {(g.hasIneligibleMembers || g.needsVerificationReview) && (
+                      <p className="mt-1 text-xs font-semibold text-[var(--red)]">
+                        {g.hasIneligibleMembers ? "Flagged: member cancelled/ineligible. " : ""}
+                        {g.needsVerificationReview
+                          ? "Legacy entry — ticket verification review recommended."
+                          : ""}
+                      </p>
+                    )}
+                    {g.members && g.members.length > 0 && (
+                      <ul className="mt-2 space-y-0.5 text-xs text-[var(--ink-soft)]">
+                        {g.members.map((m) => (
+                          <li key={m.id}>
+                            {m.fullName} · {m.status}
+                            {m.verifiedViaTicket === false ? " · needs verification" : " · ticket-linked"}
+                            {m.ineligible ? " · ineligible" : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <p className="mt-1 font-mono text-[0.65rem] text-[var(--ink-soft)]">
                       {g.id}
                     </p>
@@ -607,6 +667,23 @@ export default function OrganizerPage() {
                 </li>
               ))}
             </ul>
+          )}
+          {voting?.ballotAudit && voting.ballotAudit.length > 0 && (
+            <div className="mt-4 max-h-64 overflow-auto rounded-xl border border-[var(--red)]/10 p-3">
+              <p className="text-sm font-extrabold text-[var(--green)]">
+                Ballot audit (who cast each entitlement)
+              </p>
+              <ul className="mt-2 space-y-1 text-xs text-[var(--ink-soft)]">
+                {voting.ballotAudit.map((b) => (
+                  <li key={b.id}>
+                    {b.attendeeName} → {b.groupName} ·{" "}
+                    {b.castBy === "MANAGER"
+                      ? `manager (${b.managerName || "—"})`
+                      : "attendee self"}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </section>
 

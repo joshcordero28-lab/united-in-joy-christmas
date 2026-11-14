@@ -75,6 +75,13 @@ export function VoteClient({
   async function cast(groupId: string) {
     setError(null);
     setMessage(null);
+    if (
+      !window.confirm(
+        "Submit this vote? Submitted votes are final and cannot be changed.",
+      )
+    ) {
+      return;
+    }
     const res = await fetch("/api/vote", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -101,7 +108,9 @@ export function VoteClient({
           Vote for Your Favorite Group
         </h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          One vote per checked-in attendee for one approved performing group.
+          One vote per checked-in attendee for one approved performing group. Submitted
+          votes are final. If your registration manager already cast your vote, it will
+          show as used.
         </p>
 
         {!loggedIn ? (

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { VoteCastBy } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getVoterSession } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
@@ -62,7 +63,12 @@ export async function POST(request: Request) {
 
     try {
       const vote = await prisma.audienceVote.create({
-        data: { voterId: voter.id, groupId: group.id },
+        data: {
+          voterId: voter.id,
+          groupId: group.id,
+          castBy: VoteCastBy.SELF,
+          castByPartyId: null,
+        },
       });
 
       await writeAudit({
@@ -70,7 +76,7 @@ export async function POST(request: Request) {
         action: "audience_vote.cast",
         entityType: "AudienceVote",
         entityId: vote.id,
-        detail: `group=${group.groupName}`,
+        detail: `group=${group.groupName};by=SELF`,
       });
 
       return NextResponse.json({ ok: true, groupId: group.id });
@@ -78,7 +84,7 @@ export async function POST(request: Request) {
       const code = typeof e === "object" && e && "code" in e ? (e as { code: string }).code : "";
       if (code === "P2002") {
         return NextResponse.json(
-          { error: "You already cast your vote." },
+          { error: "This attendee’s vote was already cast." },
           { status: 409 },
         );
       }
@@ -101,7 +107,7 @@ export async function GET() {
 
   const myVote = await prisma.audienceVote.findUnique({
     where: { voterId: session.attendeeId },
-    select: { groupId: true, createdAt: true },
+    select: { groupId: true, createdAt: true, castBy: true },
   });
 
   const groups = await prisma.talentGroup.findMany({
@@ -137,8 +143,7 @@ export async function GET() {
     open: gate.open,
     resultsPublished: gate.resultsPublished,
     myVote,
-    groups: gate.open || gate.resultsPublished || myVote ? groups : groups,
-    // Always list approved groups once visibility is revealed (needed for closed-but-revealed UX).
+    groups,
     results,
     resultsLabel: gate.resultsPublished ? "Audience Choice" : null,
   });

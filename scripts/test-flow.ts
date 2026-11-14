@@ -56,6 +56,26 @@ async function main() {
   const results: string[] = [];
   const pass = (m: string) => results.push(`PASS: ${m}`);
 
+  // Clear registration rate-limit buckets so repeated local runs are not blocked.
+  try {
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient();
+    await prisma.rateLimitBucket.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: "register:" } },
+          { id: { startsWith: "register-day:" } },
+          { id: { startsWith: "group-register:" } },
+          { id: { startsWith: "ticket-verify:" } },
+          { id: { startsWith: "from-ticket:" } },
+        ],
+      },
+    });
+    await prisma.$disconnect();
+  } catch {
+    // ignore if DB unavailable — server tests will surface errors
+  }
+
   // Ensure hidden before public checks (previous runs may have revealed voting)
   const orgJar: Jar = new Map();
   {
@@ -141,6 +161,70 @@ async function main() {
   assert(!("ticketToken" in fromTicket), "from-ticket must not return ticket tokens");
   pass("from-ticket resolves leader without exposing token");
 
+  // --- Talent show ticket verification (before check-in) ---
+  const { res: verifyOk, json: verifyJ } = await req("/api/tickets/verify", {
+    method: "POST",
+    body: JSON.stringify({ ticket: tokenA, includeParty: true }),
+  });
+  assert(verifyOk.ok, `Verify issued ticket failed: ${JSON.stringify(verifyJ)}`);
+  assert(verifyJ.attendee && (verifyJ.attendee as { id: string }).id === idA, "verify returns attendee");
+  assert(!("ticketToken" in (verifyJ.attendee as object)), "verify must not echo ticketToken");
+  assert(!("phone" in (verifyJ.attendee as object)), "verify must not return phone");
+  {
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient();
+    const row = await prisma.attendee.findUnique({
+      where: { id: idA },
+      select: { checkedInAt: true },
+    });
+    assert(!row?.checkedInAt, "QR verification must not check the attendee in");
+    const votes = await prisma.audienceVote.count({ where: { voterId: idA } });
+    assert(votes === 0, "Verification must not create votes");
+    await prisma.$disconnect();
+  }
+  pass("Valid issued ticket verifies without check-in or vote changes");
+
+  const { res: verifyBad } = await req("/api/tickets/verify", {
+    method: "POST",
+    body: JSON.stringify({ ticket: "not-a-real-ticket-zzzz" }),
+  });
+  assert(verifyBad.status >= 400, "Invalid ticket rejected");
+  pass("Invalid ticket rejected for talent verification");
+
+  const { res: verifyEvil } = await req("/api/tickets/verify", {
+    method: "POST",
+    body: JSON.stringify({ ticket: "https://evil.example/phish#abcdef" }),
+  });
+  assert(verifyEvil.status >= 400, "Foreign QR URL must be rejected");
+  pass("Arbitrary remote QR URLs are not accepted");
+
+  const { res: gNoTicket } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      groupName: `No Ticket ${stamp}`,
+      performanceTitle: "Nope",
+      talentType: "Dance",
+      leaderTicket: "short",
+      partnerTickets: [],
+    }),
+  });
+  assert(gNoTicket.status === 401 || gNoTicket.status === 400, "Unregistered/invalid leader blocked");
+  pass("Unregistered people cannot submit talent-show entries");
+
+  const { res: gNames } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      groupName: `Name Bypass ${stamp}`,
+      performanceTitle: "Nope",
+      talentType: "Dance",
+      leaderTicket: tokenA,
+      memberNames: ["Fake Person"],
+      partnerNames: ["Also Fake"],
+    }),
+  });
+  assert(gNames.status === 400, "Free-text name bypass must be rejected");
+  pass("Free-text names cannot bypass attendee verification");
+
   const { res: searchAnon } = await req(
     `/api/attendees/search?q=${encodeURIComponent(`Blake Talent ${stamp}`)}`,
   );
@@ -202,6 +286,92 @@ async function main() {
   assert(gBad.status === 400, "More than 2 partners must be rejected");
   pass("Max 3 members enforced server-side");
 
+  // Party-managed partner selection (same registration)
+  const { json: partyTalent } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({
+      managerName: `Talent Lead ${stamp}`,
+      attendees: [
+        { fullName: `Talent Lead ${stamp}` },
+        { fullName: `Talent Mate ${stamp}` },
+      ],
+    }),
+  });
+  const leadTok = String((partyTalent.attendees as { ticketToken: string }[])[0].ticketToken);
+  const mateId = String((partyTalent.attendees as { id: string }[])[1].id);
+
+  const { res: gDupIds } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      leaderTicket: leadTok,
+      groupName: `Dup Ids ${stamp}`,
+      performanceTitle: "Dup",
+      talentType: "Dance",
+      partnerAttendeeIds: [mateId, mateId],
+    }),
+  });
+  assert(gDupIds.status === 400, "Duplicate partner attendee ids rejected");
+  pass("Duplicate members within one entry rejected");
+
+  const { res: gParty, json: gPartyJ } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      leaderTicket: leadTok,
+      groupName: `Party Act ${stamp}`,
+      performanceTitle: "Together",
+      talentType: "Mixed / Variety",
+      partnerAttendeeIds: [mateId],
+      partnerTickets: [],
+    }),
+  });
+  assert(gParty.ok, `Party partner select failed: ${JSON.stringify(gPartyJ)}`);
+  assert(gPartyJ.memberCount === 2, "Leader + party mate");
+  pass("Group-managed attendees can be selected without rescanning");
+
+  // Foreign attendee id must not join via partnerAttendeeIds
+  const { res: gHijack } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      leaderTicket: leadTok,
+      groupName: `Hijack ${stamp}`,
+      performanceTitle: "Nope",
+      talentType: "Dance",
+      partnerAttendeeIds: [idB],
+    }),
+  });
+  assert(gHijack.status === 400 || gHijack.status === 409, "Cannot add attendees from another registration by id");
+  pass("Direct API bypass with foreign attendee ids rejected");
+
+  // Revoked ticket cannot verify / lead
+  const { json: revReg } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({ fullName: `Revoked Talent ${stamp}` }),
+  });
+  await req("/api/organizer/attendees/action", {
+    method: "POST",
+    jar: orgJar,
+    body: JSON.stringify({ attendeeId: revReg.attendeeId, action: "revoke" }),
+  });
+  const { res: verifyRev } = await req("/api/tickets/verify", {
+    method: "POST",
+    body: JSON.stringify({ ticket: revReg.ticketToken }),
+  });
+  assert(verifyRev.status === 403, "Revoked ticket verification rejected");
+  const { res: gRev } = await req("/api/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      leaderTicket: revReg.ticketToken,
+      groupName: `Revoked Lead ${stamp}`,
+      performanceTitle: "Nope",
+      talentType: "Dance",
+    }),
+  });
+  assert(
+    gRev.status === 403 || gRev.status === 401,
+    `Revoked ticket cannot lead a talent group (got ${gRev.status})`,
+  );
+  pass("Revoked / cancelled tickets rejected");
+
   const { res: g1, json: g1j } = await req("/api/groups", {
     method: "POST",
     body: JSON.stringify({
@@ -217,6 +387,18 @@ async function main() {
   assert(g1j.maxMembers === 3, "maxMembers should be 3");
   const groupId = String(g1j.groupId);
   pass("Talent group registered via partner tickets (max 3)");
+
+  // Organizer sees linked members + verification flags
+  const { json: orgGroups } = await req("/api/organizer/groups", { jar: orgJar });
+  const listed = ((orgGroups.groups as { id: string; members: { verifiedViaTicket: boolean }[] }[]) || []).find(
+    (g) => g.id === groupId,
+  );
+  assert(listed && listed.members.length === 3, "Organizer groups list linked attendees");
+  assert(
+    listed!.members.every((m) => m.verifiedViaTicket === true),
+    "New entries marked verifiedViaTicket",
+  );
+  pass("Organizer sees linked attendee verification status");
   await req("/api/organizer/groups", {
     method: "PATCH",
     jar: orgJar,
@@ -247,12 +429,13 @@ async function main() {
   });
   pass("Voting opened");
 
-  const { json: c } = await req("/api/register", {
+  const { res: regC, json: c } = await req("/api/register", {
     method: "POST",
     body: JSON.stringify({ fullName: `Casey Unchecked ${stamp}` }),
   });
+  assert(regC.ok, `Unchecked registrant failed: ${JSON.stringify(c)}`);
   const voterC: Jar = new Map();
-  const { res: loginC } = await req("/api/auth/voter/login", {
+  const { res: loginC, json: loginCJ } = await req("/api/auth/voter/login", {
     method: "POST",
     jar: voterC,
     body: JSON.stringify({
@@ -260,7 +443,10 @@ async function main() {
       votingCredential: c.votingCredential,
     }),
   });
-  assert(loginC.status === 403, "Unchecked-in voter rejected");
+  assert(
+    loginC.status === 403,
+    `Unchecked-in voter rejected (got ${loginC.status}: ${JSON.stringify(loginCJ)})`,
+  );
   pass("Unchecked-in voter rejected");
 
   const voterA: Jar = new Map();
@@ -287,6 +473,276 @@ async function main() {
   assert(voteDup.status === 409, "Duplicate vote rejected");
   pass("Duplicate vote rejected");
 
+  // --- Registration parties & manager entitlements ---
+  const { res: partyRes, json: party } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({
+      managerName: `Jordan Manager ${stamp}`,
+      phone: "555-0199",
+      attendees: [
+        { fullName: `Jordan Manager ${stamp}` },
+        { fullName: `Sam Guest ${stamp}` },
+        { fullName: `Riley Guest ${stamp}` },
+        { fullName: `Casey Guest ${stamp}` },
+        { fullName: `Avery Guest ${stamp}` },
+      ],
+    }),
+  });
+  assert(partyRes.ok, `Party register failed: ${JSON.stringify(party)}`);
+  assert(Array.isArray(party.attendees) && party.attendees.length === 5, "Party must create 5 tickets");
+  assert(typeof party.managerToken === "string" && party.managerToken.length >= 16, "managerToken required");
+  const partyTokens = (party.attendees as { ticketToken: string; votingCredential: string; id: string; fullName: string }[]);
+  const tokenSet = new Set(partyTokens.map((t) => t.ticketToken));
+  assert(tokenSet.size === 5, "Each attendee needs a unique ticket");
+  assert(!tokenSet.has(String(party.managerToken)), "Manager token must not equal a ticket");
+  pass("Group registration creates separate tickets + manager token");
+
+  const { json: manageBeforeCheckin } = await req("/api/manage/view", {
+    method: "POST",
+    body: JSON.stringify({ managerToken: party.managerToken }),
+  });
+  // Voting already revealed/open in this phase — balance should appear
+  assert(manageBeforeCheckin.voting, "Manage view should expose balance while voting revealed");
+  assert(manageBeforeCheckin.voting.eligible === 0, "No check-ins yet → 0 eligible");
+  assert(manageBeforeCheckin.voting.remaining === 0, "No check-ins → 0 remaining");
+  pass("Unchecked party has zero voting entitlements");
+
+  // Hide voting briefly to ensure manage page omits all ballot fields
+  await req("/api/organizer/voting", {
+    method: "PATCH",
+    jar: orgJar,
+    body: JSON.stringify({ visibility: "HIDDEN", state: "CLOSED" }),
+  });
+  const { json: manageWhenHidden } = await req("/api/manage/view", {
+    method: "POST",
+    body: JSON.stringify({ managerToken: party.managerToken }),
+  });
+  assert(!("voting" in manageWhenHidden), "Manage page must omit voting while hidden");
+  assert(!("groups" in manageWhenHidden), "Manage page must omit ballot groups while hidden");
+  const { res: manageVoteHidden } = await req("/api/manage/vote", {
+    method: "POST",
+    body: JSON.stringify({
+      managerToken: party.managerToken,
+      confirm: true,
+      allocations: [{ groupId, votes: 1 }],
+    }),
+  });
+  assert(manageVoteHidden.status === 404, "Manage vote API 404 while hidden");
+  await req("/api/organizer/voting", {
+    method: "PATCH",
+    jar: orgJar,
+    body: JSON.stringify({ visibility: "REVEALED", state: "OPEN" }),
+  });
+  pass("Voting remains completely hidden on manage surfaces before reveal");
+
+  // Partial check-in: 3 of 5
+  for (const t of partyTokens.slice(0, 3)) {
+    const { res: ci } = await req("/api/checkin", {
+      method: "POST",
+      jar: staffJar,
+      body: JSON.stringify({ token: t.ticketToken, method: "manual" }),
+    });
+    assert(ci.ok, `Check-in failed for ${t.fullName}`);
+  }
+  // Re-check same ticket — no extra entitlement
+  await req("/api/checkin", {
+    method: "POST",
+    jar: staffJar,
+    body: JSON.stringify({ token: partyTokens[0].ticketToken, method: "manual" }),
+  });
+
+  const { json: managePartial } = await req("/api/manage/view", {
+    method: "POST",
+    body: JSON.stringify({ managerToken: party.managerToken }),
+  });
+  assert(managePartial.voting.eligible === 3, `eligible expected 3 got ${managePartial.voting.eligible}`);
+  assert(managePartial.voting.remaining === 3, "remaining should be 3 after partial check-in");
+  pass("Partial group check-in grants only corresponding votes");
+
+  // Over-allocate must fail completely (remaining is 3)
+  const { res: overRes, json: overJ } = await req("/api/manage/vote", {
+    method: "POST",
+    body: JSON.stringify({
+      managerToken: party.managerToken,
+      confirm: true,
+      allocations: [{ groupId, votes: 4 }],
+    }),
+  });
+  assert(overRes.status === 409, `Over-limit must 409, got ${overRes.status}: ${JSON.stringify(overJ)}`);
+  const { json: afterOver } = await req("/api/manage/view", {
+    method: "POST",
+    body: JSON.stringify({ managerToken: party.managerToken }),
+  });
+  assert(afterOver.voting.used === 0, "Over-limit must not record partial votes");
+  pass("Excessive allocation rejected with no partial recording");
+
+  // Split: 2 votes now
+  const { res: splitRes, json: splitJ } = await req("/api/manage/vote", {
+    method: "POST",
+    body: JSON.stringify({
+      managerToken: party.managerToken,
+      confirm: true,
+      allocations: [{ groupId, votes: 2 }],
+    }),
+  });
+  assert(splitRes.ok, `Split vote failed: ${JSON.stringify(splitJ)}`);
+  assert(splitJ.cast === 2, "Expected 2 manager votes");
+  const { json: afterSplit } = await req("/api/manage/view", {
+    method: "POST",
+    body: JSON.stringify({ managerToken: party.managerToken }),
+  });
+  assert(afterSplit.voting.used === 2 && afterSplit.voting.remaining === 1, "2 used / 1 remaining");
+  pass("Partial manager voting leaves remaining balance");
+
+  // Remaining attendee self-vote competes for last entitlement
+  const lastEligible = (afterSplit.voting.remainingAttendees as { id: string }[])[0];
+  const lastPerson = partyTokens.find((t) => t.id === lastEligible.id)!;
+  const voterLast: Jar = new Map();
+  const { res: loginLast } = await req("/api/auth/voter/login", {
+    method: "POST",
+    jar: voterLast,
+    body: JSON.stringify({
+      ticketToken: lastPerson.ticketToken,
+      votingCredential: lastPerson.votingCredential,
+    }),
+  });
+  assert(loginLast.ok, "Last eligible attendee voter login");
+  const { res: selfLast } = await req("/api/vote", {
+    method: "POST",
+    jar: voterLast,
+    body: JSON.stringify({ groupId }),
+  });
+  assert(selfLast.ok, "Self vote on remaining entitlement");
+
+  const { res: mgrRace } = await req("/api/manage/vote", {
+    method: "POST",
+    body: JSON.stringify({
+      managerToken: party.managerToken,
+      confirm: true,
+      allocations: [{ groupId, votes: 1 }],
+    }),
+  });
+  assert(mgrRace.status === 409, "Manager cannot reuse entitlement already cast by attendee");
+  pass("Self and manager share the same entitlement");
+
+  // Simultaneous-ish retries: replay same manager allocation after exhausted
+  const { res: retryRes } = await req("/api/manage/vote", {
+    method: "POST",
+    body: JSON.stringify({
+      managerToken: party.managerToken,
+      confirm: true,
+      allocations: [{ groupId, votes: 1 }],
+    }),
+  });
+  assert(retryRes.status === 409, "Retry after exhausted remaining must fail");
+  pass("Retries do not create duplicate votes");
+
+  // Ticket-only access must not unlock manage for other tickets
+  const { res: badManage } = await req("/api/manage/view", {
+    method: "POST",
+    body: JSON.stringify({ managerToken: partyTokens[1].ticketToken }),
+  });
+  assert(badManage.status === 401, "Ticket token must not open management page");
+  pass("Ticket credential does not grant group management");
+
+  // Manager-not-attendee registration
+  const { json: mgrOnly } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({
+      managerName: `Pat NonAttendee ${stamp}`,
+      attendees: [{ fullName: `Only Guest ${stamp}` }],
+    }),
+  });
+  assert(mgrOnly.attendees.length === 1, "Manager-only contact creates one attendee ticket");
+  assert(
+    (mgrOnly.attendees as { fullName: string }[])[0].fullName === `Only Guest ${stamp}`,
+    "Sole ticket is the guest, not the manager",
+  );
+  pass("Manager not included unless listed as attendee");
+
+  // Cancelled / revoked attendee: no unused entitlement
+  const { json: revokeParty } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({
+      managerName: `Revoke Case ${stamp}`,
+      attendees: [
+        { fullName: `Revoke Case ${stamp}` },
+        { fullName: `Revoked Friend ${stamp}` },
+      ],
+    }),
+  });
+  const revokeFriend = (revokeParty.attendees as { id: string; ticketToken: string }[])[1];
+  await req("/api/checkin", {
+    method: "POST",
+    jar: staffJar,
+    body: JSON.stringify({ token: (revokeParty.attendees as { ticketToken: string }[])[0].ticketToken, method: "manual" }),
+  });
+  await req("/api/checkin", {
+    method: "POST",
+    jar: staffJar,
+    body: JSON.stringify({ token: revokeFriend.ticketToken, method: "manual" }),
+  });
+  await req("/api/organizer/attendees/action", {
+    method: "POST",
+    jar: orgJar,
+    body: JSON.stringify({ attendeeId: revokeFriend.id, action: "revoke" }),
+  });
+  const { json: revokeView } = await req("/api/manage/view", {
+    method: "POST",
+    body: JSON.stringify({ managerToken: revokeParty.managerToken }),
+  });
+  assert(revokeView.voting.eligible === 1, "Revoked attendee drops from eligible pool");
+  pass("Revoked attendees receive no unused voting entitlement");
+
+  // All-to-one-group path (fresh party, both checked in)
+  const { json: allOne } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({
+      managerName: `AllOne ${stamp}`,
+      attendees: [
+        { fullName: `AllOne ${stamp}` },
+        { fullName: `AllTwo ${stamp}` },
+      ],
+    }),
+  });
+  for (const t of allOne.attendees as { ticketToken: string }[]) {
+    await req("/api/checkin", {
+      method: "POST",
+      jar: staffJar,
+      body: JSON.stringify({ token: t.ticketToken, method: "manual" }),
+    });
+  }
+  const { res: allRes, json: allJ } = await req("/api/manage/vote", {
+    method: "POST",
+    body: JSON.stringify({
+      managerToken: allOne.managerToken,
+      confirm: true,
+      allocations: [{ groupId, votes: 2 }],
+    }),
+  });
+  assert(allRes.ok, `All-to-one failed: ${JSON.stringify(allJ)}`);
+  assert(allJ.cast === 2, "All remaining votes to one group");
+  pass("Manager can cast all available votes for one performing group");
+
+  // Solo legacy still works
+  {
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient();
+    await prisma.rateLimitBucket.deleteMany({
+      where: {
+        OR: [{ id: { startsWith: "register:" } }, { id: { startsWith: "register-day:" } }],
+      },
+    });
+    await prisma.$disconnect();
+  }
+  const { res: soloRes, json: solo } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({ fullName: `Solo Legacy ${stamp}`, phone: "555-0000" }),
+  });
+  assert(soloRes.ok && solo.ticketToken && solo.managerToken, "Solo registration still works");
+  assert(solo.attendees.length === 1, "Solo maps to party of one");
+  pass("Existing individual registration shape continues to work");
+
   await req("/api/organizer/voting", {
     method: "PATCH",
     jar: orgJar,
@@ -294,11 +750,18 @@ async function main() {
   });
   pass("Voting closed after ballots");
 
-  const { res: pub, json: pubJ } = await req("/api/organizer/voting", {
+  let { res: pub, json: pubJ } = await req("/api/organizer/voting", {
     method: "PATCH",
     jar: orgJar,
     body: JSON.stringify({ resultsPublished: true }),
   });
+  if (!pub.ok && Array.isArray(pubJ.tied)) {
+    ({ res: pub, json: pubJ } = await req("/api/organizer/voting", {
+      method: "PATCH",
+      jar: orgJar,
+      body: JSON.stringify({ resultsPublished: true, resolveTieGroupId: groupId }),
+    }));
+  }
   assert(pub.ok, `Publish failed: ${JSON.stringify(pubJ)}`);
   pass("Results published");
 
