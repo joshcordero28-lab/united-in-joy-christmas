@@ -5,7 +5,7 @@ import { clientIp, rateLimit } from "@/lib/rate-limit";
 import { writeAudit } from "@/lib/audit";
 import { extractTicketToken } from "@/lib/tickets";
 
-const MAX_MEMBERS = 2;
+const MAX_MEMBERS = 3;
 
 const registerSchema = z.object({
   groupName: z.string().trim().min(2).max(80),

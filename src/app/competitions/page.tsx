@@ -14,7 +14,7 @@ const TALENT_TYPES = [
   "Other",
 ];
 
-const MAX_MEMBERS = 2;
+const MAX_MEMBERS = 3;
 
 type Person = {
   id: string;
@@ -262,7 +262,7 @@ export default function TalentShowRegisterPage() {
               {slotsLeft > 0 ? (
                 <div>
                   <label className="label" htmlFor="memberSearch">
-                    Add {slotsLeft === 1 ? "one partner" : "members"} — search by name
+                    Add {slotsLeft === 1 ? "another partner" : "partners"} — search by name
                   </label>
                   <input
                     id="memberSearch"
@@ -303,7 +303,7 @@ export default function TalentShowRegisterPage() {
                 </div>
               ) : (
                 <p className="text-sm text-[var(--ink-soft)]">
-                  Member limit reached ({MAX_MEMBERS}). Remove your partner to choose someone
+                  Member limit reached ({MAX_MEMBERS}). Remove a partner to choose someone
                   else.
                 </p>
               )}

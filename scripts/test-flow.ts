@@ -124,6 +124,13 @@ async function main() {
   });
   const tokenB = String(b.ticketToken);
   const idB = String(b.attendeeId);
+
+  const { json: cExtra } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({ fullName: `Chris Talent ${stamp}`, phone: "555-0103" }),
+  });
+  const tokenC = String(cExtra.ticketToken);
+  const idC = String(cExtra.attendeeId);
   pass("Attendees registered");
 
   const { json: fromTicket } = await req("/api/attendees/from-ticket", {
@@ -167,9 +174,14 @@ async function main() {
     jar: staffJar,
     body: JSON.stringify({ token: tokenB, method: "manual" }),
   });
+  await req("/api/checkin", {
+    method: "POST",
+    jar: staffJar,
+    body: JSON.stringify({ token: tokenC, method: "manual" }),
+  });
   pass("Check-ins complete");
 
-  // Reject free-text member ticket tokens / more than 2 members
+  // Reject more than 3 members
   const { res: gBad } = await req("/api/groups", {
     method: "POST",
     body: JSON.stringify({
@@ -177,11 +189,11 @@ async function main() {
       groupName: `Too Many ${stamp}`,
       performanceTitle: "Nope",
       talentType: "Song / Vocal",
-      memberAttendeeIds: [idA, idB, "extra-id"],
+      memberAttendeeIds: [idA, idB, idC, "extra-id"],
     }),
   });
-  assert(gBad.status === 400, "More than 2 members must be rejected");
-  pass("Max 2 members enforced server-side");
+  assert(gBad.status === 400, "More than 3 members must be rejected");
+  pass("Max 3 members enforced server-side");
 
   const { res: g1, json: g1j } = await req("/api/groups", {
     method: "POST",
@@ -190,14 +202,14 @@ async function main() {
       groupName: `Joyful Voices ${stamp}`,
       performanceTitle: "Carol Medley",
       talentType: "Song / Vocal",
-      memberAttendeeIds: [idA, idB],
+      memberAttendeeIds: [idA, idB, idC],
     }),
   });
   assert(g1.ok, `Group register failed: ${JSON.stringify(g1j)}`);
-  assert(g1j.memberCount === 2, `Expected 2 members, got ${g1j.memberCount}`);
-  assert(g1j.maxMembers === 2, "maxMembers should be 2");
+  assert(g1j.memberCount === 3, `Expected 3 members, got ${g1j.memberCount}`);
+  assert(g1j.maxMembers === 3, "maxMembers should be 3");
   const groupId = String(g1j.groupId);
-  pass("Talent group registered via attendee ids (max 2)");
+  pass("Talent group registered via attendee ids (max 3)");
   await req("/api/organizer/groups", {
     method: "PATCH",
     jar: orgJar,
