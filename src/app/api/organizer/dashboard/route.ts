@@ -18,19 +18,26 @@ export async function GET() {
       issued,
       pending,
       revoked,
+      removed,
       checkedIn,
       groupsPending,
       groupsApproved,
       voteCount,
+      voidedVoteCount,
     ] = await Promise.all([
-      prisma.attendee.count(),
+      // Active registered = not soft-removed (history retained separately).
+      prisma.attendee.count({ where: { status: { not: "REMOVED" } } }),
       prisma.attendee.count({ where: { status: "ISSUED" } }),
       prisma.attendee.count({ where: { status: "PENDING" } }),
       prisma.attendee.count({ where: { status: "REVOKED" } }),
-      prisma.attendee.count({ where: { checkedInAt: { not: null } } }),
+      prisma.attendee.count({ where: { status: "REMOVED" } }),
+      prisma.attendee.count({
+        where: { checkedInAt: { not: null }, status: "ISSUED" },
+      }),
       prisma.talentGroup.count({ where: { status: "PENDING" } }),
       prisma.talentGroup.count({ where: { status: "APPROVED" } }),
-      prisma.audienceVote.count(),
+      prisma.audienceVote.count({ where: { voidedAt: null } }),
+      prisma.audienceVote.count({ where: { voidedAt: { not: null } } }),
     ]);
 
     const groups = await prisma.talentGroup.findMany({
@@ -53,10 +60,12 @@ export async function GET() {
         issued,
         pending,
         revoked,
+        removed,
         checkedIn,
         groupsPending,
         groupsApproved,
         votes: voteCount,
+        voidedVotes: voidedVoteCount,
         capacity: event.capacity,
       },
       groups: groups.map((g) => {
@@ -80,6 +89,8 @@ export async function GET() {
           members,
           hasIneligibleMembers: members.some((m) => m.ineligible),
           needsVerificationReview: members.some((m) => m.needsVerification),
+          needsMemberReview: g.needsMemberReview,
+          memberReviewNote: g.memberReviewNote,
         };
       }),
       staff: {

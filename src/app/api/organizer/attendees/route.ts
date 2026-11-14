@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getStaffSession, requireStaff } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
 import { attendeeIsEligible } from "@/lib/vote-entitlements";
+import { ticketStaffRef } from "@/lib/attendee-removal";
 
 function maskContact(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
     const q = (searchParams.get("q") || "").trim();
     const status = searchParams.get("status");
     const checkedIn = searchParams.get("checkedIn");
+    const includeRemoved = searchParams.get("includeRemoved") === "1";
     const event = await getEventConfig();
 
     const attendees = await prisma.attendee.findMany({
@@ -59,7 +61,11 @@ export async function GET(request: Request) {
                 ],
               }
             : {},
-          status ? { status: status as "ISSUED" | "PENDING" | "REVOKED" } : {},
+          status
+            ? { status: status as "ISSUED" | "PENDING" | "REVOKED" | "REMOVED" }
+            : isOrganizer && includeRemoved
+              ? {}
+              : { status: { not: "REMOVED" } },
           checkedIn === "true"
             ? { checkedInAt: { not: null } }
             : checkedIn === "false"
@@ -79,6 +85,9 @@ export async function GET(request: Request) {
         issuedAt: true,
         checkedInAt: true,
         checkInMethod: true,
+        ticketToken: true,
+        removedAt: true,
+        removalReason: true,
         registrationPartyId: true,
         registrationParty: {
           select: {
@@ -92,8 +101,14 @@ export async function GET(request: Request) {
           select: {
             id: true,
             castBy: true,
+            voidedAt: true,
             group: { select: { groupName: true } },
           },
+        },
+        checkInEvents: {
+          orderBy: { createdAt: "desc" },
+          take: 3,
+          select: { id: true, action: true, createdAt: true, method: true },
         },
       },
     });
@@ -107,7 +122,7 @@ export async function GET(request: Request) {
         registrationPartyId: true,
         status: true,
         checkedInAt: true,
-        audienceVotes: { select: { id: true } },
+        audienceVotes: { select: { id: true, voidedAt: true } },
       },
     });
 
@@ -122,7 +137,8 @@ export async function GET(request: Request) {
         remaining: 0,
         attendeeCount: 0,
       };
-      cur.attendeeCount += 1;
+      // Active party size excludes soft-removed (history retained on removed rows separately).
+      if (m.status !== "REMOVED") cur.attendeeCount += 1;
       const eligible = attendeeIsEligible(m, event.votingEnabledAfterCheckIn);
       if (eligible) {
         cur.eligible += 1;
@@ -135,17 +151,21 @@ export async function GET(request: Request) {
     return NextResponse.json({
       attendees: attendees.map((a) => {
         const stats = partyStats.get(a.registrationPartyId);
-        const vote = a.audienceVotes[0];
+        const activeVote = a.audienceVotes.find((v) => !v.voidedAt);
+        const voidedVote = a.audienceVotes.find((v) => v.voidedAt);
         return {
           id: a.id,
           fullName: a.fullName,
           phone: isOrganizer ? a.phone : maskContact(a.phone),
           email: isOrganizer ? a.email : maskContact(a.email),
           status: a.status,
+          ticketRef: ticketStaffRef(a.ticketToken),
           registeredAt: a.registeredAt,
           issuedAt: a.issuedAt,
           checkedInAt: a.checkedInAt,
           checkInMethod: a.checkInMethod,
+          removedAt: a.removedAt,
+          removalReason: isOrganizer ? a.removalReason : null,
           partyId: a.registrationPartyId,
           managerName: a.registrationParty.managerName,
           managerPhone: isOrganizer
@@ -158,8 +178,11 @@ export async function GET(request: Request) {
           partyUsed: stats?.used ?? 0,
           partyRemaining: stats?.remaining ?? 0,
           partyAttendeeCount: stats?.attendeeCount ?? 1,
-          voteCastBy: vote?.castBy ?? null,
-          voteGroupName: vote?.group.groupName ?? null,
+          voteCastBy: activeVote?.castBy ?? null,
+          voteGroupName: activeVote?.group.groupName ?? null,
+          hasVoidedBallot: Boolean(voidedVote),
+          voidedVoteGroupName: voidedVote?.group.groupName ?? null,
+          recentCheckIns: a.checkInEvents,
         };
       }),
     });

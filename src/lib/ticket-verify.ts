@@ -12,7 +12,7 @@ export type TicketVerifyOk = {
 export type TicketVerifyErr = {
   ok: false;
   status: number;
-  code: "invalid" | "pending" | "revoked" | "not_registered";
+  code: "invalid" | "pending" | "revoked" | "removed" | "not_registered";
   error: string;
   registerUrl: "/register";
 };
@@ -72,6 +72,16 @@ export async function verifyAttendeeTicket(
       status: 403,
       code: "revoked",
       error: "This ticket has been cancelled and cannot join the talent show.",
+      registerUrl: "/register",
+    };
+  }
+
+  if (attendee.status === TicketStatus.REMOVED) {
+    return {
+      ok: false,
+      status: 403,
+      code: "removed",
+      error: "This registration was removed and cannot join the talent show.",
       registerUrl: "/register",
     };
   }

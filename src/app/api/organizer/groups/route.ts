@@ -12,6 +12,7 @@ function memberFlags(attendee: {
   const eligible = attendee.status === TicketStatus.ISSUED;
   const reasons: string[] = [];
   if (attendee.status === TicketStatus.REVOKED) reasons.push("cancelled");
+  if (attendee.status === TicketStatus.REMOVED) reasons.push("removed");
   if (attendee.status === TicketStatus.PENDING) reasons.push("pending approval");
   if (!verifiedViaTicket) reasons.push("legacy — needs verification review");
   return {
@@ -69,6 +70,8 @@ export async function GET() {
           members,
           hasIneligibleMembers: members.some((m) => m.ineligible),
           needsVerificationReview: members.some((m) => m.needsVerification),
+          needsMemberReview: g.needsMemberReview,
+          memberReviewNote: g.memberReviewNote,
           voteCountHidden: true,
         };
       }),
@@ -81,7 +84,7 @@ export async function GET() {
 
 const patchSchema = z.object({
   groupId: z.string().min(1),
-  action: z.enum(["approve", "reject", "withdraw", "set_order"]),
+  action: z.enum(["approve", "reject", "withdraw", "set_order", "clear_member_review"]),
   performanceOrder: z.number().int().min(1).max(999).optional(),
   rejectionNote: z.string().trim().max(300).optional(),
 });
@@ -111,6 +114,7 @@ export async function PATCH(request: Request) {
     let status: GroupStatus | undefined;
     let performanceOrder = group.performanceOrder;
     let rejectionNote = group.rejectionNote;
+    let clearMemberReview = false;
 
     if (parsed.data.action === "approve") {
       status = "APPROVED";
@@ -132,6 +136,8 @@ export async function PATCH(request: Request) {
         return NextResponse.json({ error: "performanceOrder required." }, { status: 400 });
       }
       performanceOrder = parsed.data.performanceOrder;
+    } else if (parsed.data.action === "clear_member_review") {
+      clearMemberReview = true;
     }
 
     const updated = await prisma.talentGroup.update({
@@ -140,6 +146,9 @@ export async function PATCH(request: Request) {
         ...(status ? { status } : {}),
         performanceOrder,
         rejectionNote,
+        ...(clearMemberReview
+          ? { needsMemberReview: false, memberReviewNote: null }
+          : {}),
       },
     });
 

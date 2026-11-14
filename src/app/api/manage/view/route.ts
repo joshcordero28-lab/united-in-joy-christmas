@@ -48,13 +48,17 @@ export async function POST(request: Request) {
     const gate = await getPublicVotingGate();
     const event = await getEventConfig();
 
-    const attendees = party.attendees.map((a) => ({
-      id: a.id,
-      fullName: a.fullName,
-      status: a.status,
-      checkedIn: Boolean(a.checkedInAt),
-      ticketToken: a.status === "ISSUED" ? a.ticketToken : null,
-    }));
+    // Soft-removed attendees stay in history server-side but are hidden from the
+    // active management ticket list (party + manager access preserved).
+    const attendees = party.attendees
+      .filter((a) => a.status !== "REMOVED")
+      .map((a) => ({
+        id: a.id,
+        fullName: a.fullName,
+        status: a.status,
+        checkedIn: Boolean(a.checkedInAt),
+        ticketToken: a.status === "ISSUED" ? a.ticketToken : null,
+      }));
 
     const payload: Record<string, unknown> = {
       partyId: party.id,

@@ -20,10 +20,12 @@ type Dashboard = {
     issued: number;
     pending: number;
     revoked: number;
+    removed?: number;
     checkedIn: number;
     groupsPending: number;
     groupsApproved: number;
     votes: number;
+    voidedVotes?: number;
     capacity: number;
   };
   groups: {
@@ -37,6 +39,8 @@ type Dashboard = {
     leaderName: string;
     hasIneligibleMembers?: boolean;
     needsVerificationReview?: boolean;
+    needsMemberReview?: boolean;
+    memberReviewNote?: string | null;
     members?: {
       id: string;
       fullName: string;
@@ -54,7 +58,10 @@ type Attendee = {
   phone: string | null;
   email: string | null;
   status: string;
+  ticketRef?: string | null;
   checkedInAt: string | null;
+  removedAt?: string | null;
+  removalReason?: string | null;
   partyId?: string;
   managerName?: string;
   partyEligible?: number;
@@ -63,16 +70,20 @@ type Attendee = {
   partyAttendeeCount?: number;
   voteCastBy?: string | null;
   voteGroupName?: string | null;
+  hasVoidedBallot?: boolean;
+  voidedVoteGroupName?: string | null;
 };
 
 type VotingInfo = {
   visibility: "HIDDEN" | "REVEALED";
   talentVotingState: "CLOSED" | "OPEN";
   resultsPublished: boolean;
+  resultsCorrectionPending?: boolean;
   resultsLabel: string;
   privateResults: { groupId: string; groupName: string; performanceTitle: string; votes: number }[];
   ties: null | { groupId: string; groupName: string; votes: number }[];
   voteCount: number;
+  voidedVoteCount?: number;
   ballotAudit?: {
     id: string;
     attendeeName: string;
@@ -80,6 +91,8 @@ type VotingInfo = {
     castBy: string;
     managerName: string | null;
     createdAt: string;
+    voidedAt?: string | null;
+    voidedReason?: string | null;
   }[];
   publicPhase?: string;
   legacyKingQueenVoteCount?: number;
@@ -93,6 +106,7 @@ export default function OrganizerPage() {
   const [dash, setDash] = useState<Dashboard | null>(null);
   const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [q, setQ] = useState("");
+  const [showRemoved, setShowRemoved] = useState(false);
   const [voting, setVoting] = useState<VotingInfo | null>(null);
   const [logs, setLogs] = useState<
     { id: string; createdAt: string; actorLabel: string | null; action: string; detail: string | null }[]
@@ -100,10 +114,13 @@ export default function OrganizerPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function loadAll() {
+  async function loadAll(includeRemoved = showRemoved) {
+    const attendeesUrl = includeRemoved
+      ? "/api/organizer/attendees?includeRemoved=1"
+      : "/api/organizer/attendees";
     const [dRes, aRes, vRes, lRes] = await Promise.all([
       fetch("/api/organizer/dashboard"),
-      fetch("/api/organizer/attendees"),
+      fetch(attendeesUrl),
       fetch("/api/organizer/voting"),
       fetch("/api/organizer/audit"),
     ]);
@@ -143,7 +160,10 @@ export default function OrganizerPage() {
   }
 
   async function search() {
-    const res = await fetch(`/api/organizer/attendees?q=${encodeURIComponent(q)}`);
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (showRemoved) params.set("includeRemoved", "1");
+    const res = await fetch(`/api/organizer/attendees?${params.toString()}`);
     const data = await res.json();
     setAttendees(data.attendees || []);
   }
@@ -168,9 +188,109 @@ export default function OrganizerPage() {
     await loadAll();
   }
 
+  async function removeAttendee(a: Attendee) {
+    setError(null);
+    setMessage(null);
+    const previewRes = await fetch(
+      `/api/organizer/attendees/remove?attendeeId=${encodeURIComponent(a.id)}`,
+    );
+    const previewData = await previewRes.json();
+    if (!previewRes.ok) {
+      setError(previewData.error || "Could not load removal preview.");
+      return;
+    }
+    const preview = previewData.preview as {
+      fullName: string;
+      ticketRef: string | null;
+      hasActiveVote: boolean;
+      voteGroupName: string | null;
+      resultsPublished: boolean;
+      talentGroups: { groupName: string }[];
+    };
+    const reason = prompt(
+      [
+        `Remove attendee “${preview.fullName}”?`,
+        `Ticket ref: ${preview.ticketRef || "n/a"}`,
+        preview.hasActiveVote
+          ? `WARNING: already voted for ${preview.voteGroupName || "an act"} — ballot will be voided.`
+          : "No active ballot.",
+        preview.resultsPublished
+          ? "Public results are published — they will be unpublished for organizer correction."
+          : "",
+        preview.talentGroups.length
+          ? `Talent acts flagged for review: ${preview.talentGroups.map((g) => g.groupName).join(", ")}`
+          : "",
+        "",
+        "Enter a reason (required):",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    if (!reason || reason.trim().length < 3) {
+      setError("Removal cancelled — reason required.");
+      return;
+    }
+    let confirmVoidBallot = false;
+    if (preview.hasActiveVote) {
+      const ok = confirm(
+        `Confirm voiding the ballot for ${preview.fullName}? The ballot is kept for audit and excluded from tallies.`,
+      );
+      if (!ok) {
+        setError("Removal cancelled — organizer must confirm voiding the ballot.");
+        return;
+      }
+      confirmVoidBallot = true;
+    }
+    const res = await fetch("/api/organizer/attendees/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        attendeeId: a.id,
+        reason: reason.trim(),
+        confirmVoidBallot,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || "Removal failed.");
+      return;
+    }
+    setMessage(
+      `Removed ${data.fullName}. Party preserved.${
+        data.resultsCorrectionPending ? " Republish Audience Choice after review." : ""
+      }`,
+    );
+    await loadAll(true);
+  }
+
+  async function restoreAttendee(a: Attendee) {
+    setError(null);
+    setMessage(null);
+    const reason =
+      prompt(
+        `Restore “${a.fullName}” (ticket was ${a.ticketRef || "n/a"})?\nOptional note:`,
+      ) || undefined;
+    const res = await fetch("/api/organizer/attendees/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attendeeId: a.id, reason }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || "Restore failed.");
+      return;
+    }
+    setMessage(
+      `Restored ${data.fullName}. New ticket ref ${data.ticketRef}. Voting code: ${data.votingCredential}.${
+        data.voidedBallotRetained ? " Voided ballot retained (no new vote)." : ""
+      }${data.talentReviewPending ? " Talent act still flagged for review." : ""}`,
+    );
+    await loadAll(true);
+  }
+
   async function groupAction(
     groupId: string,
-    action: "approve" | "reject" | "withdraw" | "set_order",
+    action: "approve" | "reject" | "withdraw" | "set_order" | "clear_member_review",
     performanceOrder?: number,
   ) {
     setError(null);
@@ -329,6 +449,8 @@ export default function OrganizerPage() {
             ["Checked in", dash?.counts.checkedIn],
             ["Groups pending", dash?.counts.groupsPending],
             ["Audience votes", dash?.counts.votes],
+            ["Removed", dash?.counts.removed],
+            ["Voided ballots", dash?.counts.voidedVotes],
           ].map(([label, value]) => (
             <div key={String(label)} className="panel p-4">
               <p className="text-sm text-[var(--red)]">{label}</p>
@@ -399,7 +521,7 @@ export default function OrganizerPage() {
               </a>
             </div>
           </div>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <input
               className="field"
               placeholder="Search name, phone, email"
@@ -409,6 +531,18 @@ export default function OrganizerPage() {
             <button type="button" className="btn btn-secondary" onClick={search}>
               Search
             </button>
+            <label className="flex items-center gap-2 text-sm text-[var(--ink-soft)]">
+              <input
+                type="checkbox"
+                checked={showRemoved}
+                onChange={async (e) => {
+                  const next = e.target.checked;
+                  setShowRemoved(next);
+                  await loadAll(next);
+                }}
+              />
+              Show removed
+            </label>
           </div>
           <div className="mt-4 max-h-96 space-y-2 overflow-auto">
             {attendees.map((a) => (
@@ -420,6 +554,7 @@ export default function OrganizerPage() {
                   <p className="font-semibold">{a.fullName}</p>
                   <p className="text-sm text-[var(--ink-soft)]">
                     {a.status}
+                    {a.ticketRef ? ` · ref ${a.ticketRef}` : ""}
                     {a.checkedInAt ? " · checked in" : ""}
                     {a.email ? ` · ${a.email}` : ""}
                   </p>
@@ -434,6 +569,12 @@ export default function OrganizerPage() {
                     {a.voteGroupName
                       ? ` · ballot: ${a.voteGroupName} (${a.voteCastBy === "MANAGER" ? "manager" : "self"})`
                       : ""}
+                    {a.hasVoidedBallot
+                      ? ` · voided ballot${a.voidedVoteGroupName ? `: ${a.voidedVoteGroupName}` : ""}`
+                      : ""}
+                    {a.status === "REMOVED" && a.removalReason
+                      ? ` · reason: ${a.removalReason}`
+                      : ""}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -446,22 +587,43 @@ export default function OrganizerPage() {
                       Approve
                     </button>
                   )}
-                  {a.status !== "REVOKED" && (
+                  {a.status === "REMOVED" ? (
                     <button
                       type="button"
-                      className="btn btn-danger !min-h-10 !px-3 !text-sm"
-                      onClick={() => attendeeAction(a.id, "revoke")}
+                      className="btn btn-primary !min-h-10 !px-3 !text-sm"
+                      onClick={() => restoreAttendee(a)}
                     >
-                      Revoke
+                      Restore
                     </button>
+                  ) : (
+                    <>
+                      {a.status !== "REVOKED" && (
+                        <button
+                          type="button"
+                          className="btn btn-danger !min-h-10 !px-3 !text-sm"
+                          onClick={() => removeAttendee(a)}
+                        >
+                          Remove attendee
+                        </button>
+                      )}
+                      {a.status !== "REVOKED" && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                          onClick={() => attendeeAction(a.id, "revoke")}
+                        >
+                          Revoke
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                        onClick={() => attendeeAction(a.id, "reissue")}
+                      >
+                        Reissue
+                      </button>
+                    </>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-secondary !min-h-10 !px-3 !text-sm"
-                    onClick={() => attendeeAction(a.id, "reissue")}
-                  >
-                    Reissue
-                  </button>
                 </div>
               </div>
             ))}
@@ -495,11 +657,17 @@ export default function OrganizerPage() {
                     <p className="text-xs text-[var(--ink-soft)]">
                       {g.talentType} · leader {g.leaderName} · {g.memberCount} members
                     </p>
-                    {(g.hasIneligibleMembers || g.needsVerificationReview) && (
+                    {(g.hasIneligibleMembers ||
+                      g.needsVerificationReview ||
+                      g.needsMemberReview) && (
                       <p className="mt-1 text-xs font-semibold text-[var(--red)]">
                         {g.hasIneligibleMembers ? "Flagged: member cancelled/ineligible. " : ""}
                         {g.needsVerificationReview
-                          ? "Legacy entry — ticket verification review recommended."
+                          ? "Legacy entry — ticket verification review recommended. "
+                          : ""}
+                        {g.needsMemberReview
+                          ? g.memberReviewNote ||
+                            "Member soft-removed — review this act before showtime."
                           : ""}
                       </p>
                     )}
@@ -552,6 +720,15 @@ export default function OrganizerPage() {
                         Set order
                       </button>
                     )}
+                    {g.needsMemberReview && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                        onClick={() => groupAction(g.id, "clear_member_review")}
+                      >
+                        Clear member review
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -567,9 +744,19 @@ export default function OrganizerPage() {
           <p className="mt-1 text-sm text-[var(--ink-soft)]">
             Voting stays off public pages until you reveal it. Phase:{" "}
             <strong>{voting?.publicPhase || "hidden"}</strong>. Votes cast:{" "}
-            {voting?.voteCount ?? 0}.
+            {voting?.voteCount ?? 0}
+            {typeof voting?.voidedVoteCount === "number"
+              ? ` · voided ${voting.voidedVoteCount}`
+              : ""}
+            .
             {voting?.note ? ` ${voting.note}` : ""}
           </p>
+          {voting?.resultsCorrectionPending && (
+            <p className="mt-2 text-sm font-semibold text-[var(--red)]">
+              Results correction pending after a voided ballot. Review private tallies, then
+              publish again (or acknowledge) — public results stay unpublished until you do.
+            </p>
+          )}
           {typeof voting?.legacyKingQueenVoteCount === "number" &&
             voting.legacyKingQueenVoteCount > 0 && (
               <p className="mt-1 text-xs text-[var(--ink-soft)]">
@@ -650,13 +837,27 @@ export default function OrganizerPage() {
                 >
                   Unpublish
                 </button>
+                {voting?.resultsCorrectionPending && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                    onClick={() =>
+                      patchVoting(
+                        { acknowledgeResultsCorrection: true },
+                        "Results correction acknowledged",
+                      )
+                    }
+                  >
+                    Acknowledge correction
+                  </button>
+                )}
               </div>
             </div>
           </div>
           {voting?.privateResults && voting.privateResults.length > 0 && (
             <ul className="mt-4 space-y-1 text-sm">
               <li className="font-extrabold text-[var(--green)]">
-                Private tallies (organizer only)
+                Private tallies (organizer only; voided excluded)
               </li>
               {voting.privateResults.map((r) => (
                 <li key={r.groupId}>
@@ -680,6 +881,7 @@ export default function OrganizerPage() {
                     {b.castBy === "MANAGER"
                       ? `manager (${b.managerName || "—"})`
                       : "attendee self"}
+                    {b.voidedAt ? ` · VOIDED (${b.voidedReason || "audit"})` : ""}
                   </li>
                 ))}
               </ul>

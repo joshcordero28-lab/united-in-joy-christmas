@@ -96,7 +96,7 @@ export async function GET(request: Request) {
         },
       });
       const lines = [
-        "voteId,attendee,group,castBy,managerName,partyId,createdAt",
+        "voteId,attendee,group,castBy,managerName,partyId,createdAt,voidedAt,voidedReason",
         ...rows.map((r) =>
           [
             r.id,
@@ -106,6 +106,8 @@ export async function GET(request: Request) {
             r.castByParty?.managerName || "",
             r.voter.registrationPartyId,
             r.createdAt.toISOString(),
+            r.voidedAt?.toISOString() || "",
+            r.voidedReason || "",
           ]
             .map(csvEscape)
             .join(","),

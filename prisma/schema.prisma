@@ -16,6 +16,8 @@ enum TicketStatus {
   PENDING
   ISSUED
   REVOKED
+  /// Soft-removed by staff/organizer (mistake registration); restorable.
+  REMOVED
 }
 
 enum CompetitionType {
@@ -74,6 +76,8 @@ model EventConfig {
   talentVotingVisibility    VotingVisibility @default(HIDDEN)
   /// When true, Audience Choice tallies are shown publicly (separate from open/close).
   talentResultsPublished    Boolean          @default(false)
+  /// Set when a ballot is voided after results were published — organizer must re-confirm.
+  talentResultsCorrectionPending Boolean     @default(false)
   updatedAt                 DateTime         @updatedAt
 }
 
@@ -119,6 +123,10 @@ model Attendee {
   registeredAt         DateTime     @default(now())
   issuedAt             DateTime?
   revokedAt            DateTime?
+  /// Soft-removal metadata (status=REMOVED). Party row is never deleted.
+  removedAt            DateTime?
+  removalReason        String?
+  removedById          String?
   checkedInAt          DateTime?
   checkedInById        String?
   checkInMethod        String?
@@ -198,6 +206,9 @@ model TalentGroup {
   status           GroupStatus @default(PENDING)
   performanceOrder Int?
   rejectionNote    String?
+  /// True when a member was soft-removed — organizer should review the act.
+  needsMemberReview Boolean    @default(false)
+  memberReviewNote  String?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
@@ -235,6 +246,10 @@ model AudienceVote {
   castBy        VoteCastBy @default(SELF)
   /// When castBy=MANAGER, the registration party that submitted the ballot.
   castByPartyId String?
+  /// Soft-voided ballots remain for audit but are excluded from tallies.
+  voidedAt      DateTime?
+  voidedReason  String?
+  voidedById    String?
   createdAt     DateTime   @default(now())
 
   voter       Attendee           @relation(fields: [voterId], references: [id], onDelete: Cascade)
@@ -243,6 +258,7 @@ model AudienceVote {
 
   @@index([groupId])
   @@index([castByPartyId])
+  @@index([voidedAt])
 }
 
 model CheckInEvent {
