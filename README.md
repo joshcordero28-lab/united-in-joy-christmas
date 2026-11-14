@@ -1,0 +1,28 @@
+# United in Love Christmas Party
+
+Standalone Next.js app for attendee registration, QR tickets, competition entry, staff check-in, and King/Queen voting — backed by shared Postgres.
+
+## Quick start
+
+```bash
+# 1) Start Postgres (Docker Compose) OR use a hosted DATABASE_URL
+docker compose up -d
+
+# 2) Configure env
+cp .env.example .env
+# Edit SESSION_SECRET, ORGANIZER_PASSWORD, STAFF_PASSWORD, DATABASE_URL
+
+# 3) Install, migrate, seed
+npm install
+npx prisma migrate deploy
+npm run db:seed
+
+# 4) Run
+npm run dev
+```
+
+Open http://localhost:3000
+
+Seed credentials come from env (`ORGANIZER_USERNAME` / `ORGANIZER_PASSWORD`, `STAFF_USERNAME` / `STAFF_PASSWORD`).
+
+See project docs for deployment, organizer guide, testing, and limitations.

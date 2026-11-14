@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: uilc
+      POSTGRES_PASSWORD: uilc_dev_password
+      POSTGRES_DB: united_in_love
+    ports:
+      - "5432:5432"
+    volumes:
+      - uilc_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uilc -d united_in_love"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  uilc_pgdata:

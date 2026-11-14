@@ -1,0 +1,67 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/db";
+import { verifyVotingCredential } from "@/lib/crypto";
+import { getVoterSession } from "@/lib/session";
+import { getEventConfig } from "@/lib/event";
+import { clientIp, rateLimit } from "@/lib/rate-limit";
+
+const schema = z.object({
+  ticketToken: z.string().min(16).max(200).optional(),
+  votingCredential: z.string().min(4).max(40),
+  attendeeId: z.string().optional(),
+});
+
+export async function POST(request: Request) {
+  try {
+    const ip = clientIp(request);
+    const limited = await rateLimit(`voter-login:${ip}`, 15, 60_000);
+    if (!limited.ok) {
+      return NextResponse.json({ error: "Too many attempts." }, { status: 429 });
+    }
+
+    const body = await request.json();
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid login details." }, { status: 400 });
+    }
+
+    const event = await getEventConfig();
+
+    const attendee = parsed.data.ticketToken
+      ? await prisma.attendee.findUnique({ where: { ticketToken: parsed.data.ticketToken } })
+      : parsed.data.attendeeId
+        ? await prisma.attendee.findUnique({ where: { id: parsed.data.attendeeId } })
+        : null;
+
+    if (!attendee || attendee.status !== "ISSUED") {
+      return NextResponse.json({ error: "Ticket not valid for voting." }, { status: 401 });
+    }
+
+    if (event.votingEnabledAfterCheckIn && !attendee.checkedInAt) {
+      return NextResponse.json(
+        { error: "Check in at the entrance before voting." },
+        { status: 403 },
+      );
+    }
+
+    const ok = await verifyVotingCredential(
+      parsed.data.votingCredential,
+      attendee.votingCredentialHash,
+    );
+    if (!ok) {
+      return NextResponse.json({ error: "Invalid voting code." }, { status: 401 });
+    }
+
+    const session = await getVoterSession();
+    session.attendeeId = attendee.id;
+    session.attendeeName = attendee.fullName;
+    session.isLoggedIn = true;
+    await session.save();
+
+    return NextResponse.json({ ok: true, fullName: attendee.fullName });
+  } catch (err) {
+    console.error("voter login failed", err);
+    return NextResponse.json({ error: "Login failed." }, { status: 500 });
+  }
+}
