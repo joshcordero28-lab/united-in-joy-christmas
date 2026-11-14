@@ -6,11 +6,13 @@ Standalone Next.js app for attendee registration, QR tickets, competition entry,
 
 ```bash
 # 1) Start Postgres (Docker Compose) OR use a hosted DATABASE_URL
+# Set POSTGRES_PASSWORD in the environment (compose default is CHANGE_ME placeholder only)
+export POSTGRES_PASSWORD='your-local-db-password'
 docker compose up -d
 
 # 2) Configure env
 cp .env.example .env
-# Edit SESSION_SECRET, ORGANIZER_PASSWORD, STAFF_PASSWORD, DATABASE_URL
+# Replace every CHANGE_ME: SESSION_SECRET, ORGANIZER_*, STAFF_*, DATABASE_URL password
 
 # 3) Install, migrate, seed
 npm install

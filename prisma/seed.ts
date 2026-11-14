@@ -3,11 +3,21 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(
+      `Missing required environment variable ${name}. Set it before running seed (e.g. in .env or app secrets).`,
+    );
+  }
+  return value;
+}
+
 async function main() {
-  const organizerPassword = process.env.ORGANIZER_PASSWORD || "ChangeMeOrganizer!";
-  const staffPassword = process.env.STAFF_PASSWORD || "ChangeMeStaff!";
-  const organizerUsername = process.env.ORGANIZER_USERNAME || "organizer";
-  const staffUsername = process.env.STAFF_USERNAME || "checkin";
+  const organizerPassword = requireEnv("ORGANIZER_PASSWORD");
+  const staffPassword = requireEnv("STAFF_PASSWORD");
+  const organizerUsername = requireEnv("ORGANIZER_USERNAME");
+  const staffUsername = requireEnv("STAFF_USERNAME");
 
   await prisma.eventConfig.upsert({
     where: { id: "default" },

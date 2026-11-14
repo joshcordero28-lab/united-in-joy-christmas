@@ -63,8 +63,8 @@ async function main() {
       method: "POST",
       jar: orgJar,
       body: JSON.stringify({
-        username: process.env.ORGANIZER_USERNAME || "organizer",
-        password: process.env.ORGANIZER_PASSWORD || "ChangeMeOrganizer!",
+        username: process.env.ORGANIZER_USERNAME,
+        password: process.env.ORGANIZER_PASSWORD,
       }),
     });
     assert(oLogin.ok, "Organizer login for hide");
@@ -160,8 +160,8 @@ async function main() {
     method: "POST",
     jar: staffJar,
     body: JSON.stringify({
-      username: process.env.STAFF_USERNAME || "checkin",
-      password: process.env.STAFF_PASSWORD || "ChangeMeStaff!",
+      username: process.env.STAFF_USERNAME,
+      password: process.env.STAFF_PASSWORD,
     }),
   });
   await req("/api/checkin", {

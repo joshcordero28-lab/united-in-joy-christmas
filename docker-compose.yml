@@ -4,7 +4,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: uilc
-      POSTGRES_PASSWORD: uilc_dev_password
+      # Set POSTGRES_PASSWORD in the environment or a local .env (never commit real passwords).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
       POSTGRES_DB: united_in_love
     ports:
       - "5432:5432"
