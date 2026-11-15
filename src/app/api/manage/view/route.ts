@@ -34,6 +34,7 @@ export async function POST(request: Request) {
             fullName: true,
             status: true,
             ticketToken: true,
+            votingCredentialPlain: true,
             checkedInAt: true,
             issuedAt: true,
           },
@@ -58,6 +59,9 @@ export async function POST(request: Request) {
         status: a.status,
         checkedIn: Boolean(a.checkedInAt),
         ticketToken: a.status === "ISSUED" ? a.ticketToken : null,
+        /// So ticket links/QR embed Audience Choice autofill for this party.
+        votingCredential:
+          a.status === "ISSUED" ? a.votingCredentialPlain : null,
       }));
 
     const payload: Record<string, unknown> = {

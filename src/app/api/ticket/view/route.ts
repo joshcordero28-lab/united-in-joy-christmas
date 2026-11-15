@@ -37,7 +37,9 @@ export async function POST(request: Request) {
 
     const event = await getEventConfig();
     const baseUrl = process.env.APP_BASE_URL || "http://127.0.0.1:3000";
-    const link = ticketUrl(baseUrl, token);
+    const voteCode =
+      attendee.status === "ISSUED" ? attendee.votingCredentialPlain : null;
+    const link = ticketUrl(baseUrl, token, voteCode);
     const qr =
       attendee.status === "ISSUED" ? await qrDataUrl(link) : null;
     const staffRef = fingerprintToken(token).toUpperCase().slice(0, 8);
@@ -51,6 +53,8 @@ export async function POST(request: Request) {
       qr,
       link,
       staffRef,
+      /// Present when this ticket's QR embeds Audience Choice autofill.
+      votingCredential: voteCode,
     });
   } catch (err) {
     console.error("ticket view failed", err);

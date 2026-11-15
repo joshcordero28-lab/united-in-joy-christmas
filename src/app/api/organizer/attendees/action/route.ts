@@ -61,12 +61,17 @@ export async function POST(request: Request) {
           status: "ISSUED",
           issuedAt: new Date(),
           votingCredentialHash,
+          votingCredentialPlain: votingCredential,
         },
       });
     } else if (parsed.data.action === "revoke") {
       await prisma.attendee.update({
         where: { id: attendee.id },
-        data: { status: "REVOKED", revokedAt: new Date() },
+        data: {
+          status: "REVOKED",
+          revokedAt: new Date(),
+          votingCredentialPlain: null,
+        },
       });
     } else if (parsed.data.action === "reissue") {
       ticketToken = generateOpaqueToken(32);
@@ -77,6 +82,7 @@ export async function POST(request: Request) {
         data: {
           ticketToken,
           votingCredentialHash,
+          votingCredentialPlain: votingCredential,
           status: "ISSUED",
           issuedAt: new Date(),
           revokedAt: null,

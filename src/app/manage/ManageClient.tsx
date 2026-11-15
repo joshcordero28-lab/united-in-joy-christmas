@@ -11,6 +11,7 @@ type AttendeeRow = {
   status: string;
   checkedIn: boolean;
   ticketToken: string | null;
+  votingCredential?: string | null;
 };
 
 type VotingInfo = {
@@ -209,7 +210,11 @@ export function ManageClient() {
                     {a.ticketToken && (
                       <Link
                         className="mt-2 inline-flex text-sm font-extrabold text-[var(--red)] underline"
-                        href={`/ticket#${encodeURIComponent(a.ticketToken)}`}
+                        href={
+                          a.votingCredential
+                            ? `/ticket#${encodeURIComponent(a.ticketToken)}~${encodeURIComponent(a.votingCredential)}`
+                            : `/ticket#${encodeURIComponent(a.ticketToken)}`
+                        }
                       >
                         Open entry ticket
                       </Link>

@@ -353,7 +353,11 @@ export default function RegisterPage() {
                       </p>
                       <Link
                         className="mt-2 inline-flex font-extrabold text-[var(--red)] underline"
-                        href={`/ticket#${encodeURIComponent(a.ticketToken)}`}
+                        href={
+                          a.votingCredential
+                            ? `/ticket#${encodeURIComponent(a.ticketToken!)}~${encodeURIComponent(a.votingCredential)}`
+                            : `/ticket#${encodeURIComponent(a.ticketToken!)}`
+                        }
                       >
                         Open ticket
                       </Link>

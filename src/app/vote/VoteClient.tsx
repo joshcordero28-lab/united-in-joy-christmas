@@ -64,10 +64,39 @@ export function VoteClient({
   }
 
   async function applyTicketScan(raw: string) {
-    const { extractTicketToken } = await import("@/lib/tickets");
-    const extracted = extractTicketToken(raw) || raw.trim();
+    const { parseTicketPayload } = await import("@/lib/tickets");
+    const payload = parseTicketPayload(raw);
+    const extracted = payload.token || raw.trim();
     setTicketToken(extracted);
-    setMessage("Ticket QR captured. Enter your voting code to continue.");
+
+    let voteCode = payload.votingCredential;
+    if (!voteCode && extracted.length >= 16) {
+      // Older QRs were token-only — pull the stored code from ticket view.
+      try {
+        const res = await fetch("/api/ticket/view", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ticket: extracted }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data.votingCredential === "string" && data.votingCredential) {
+            voteCode = data.votingCredential;
+          }
+        }
+      } catch {
+        // ignore — user can still type the code
+      }
+    }
+
+    if (voteCode) {
+      setVotingCredential(voteCode);
+      setMessage("Ticket and voting code captured from your QR. Tap Continue.");
+    } else {
+      setMessage(
+        "Ticket QR captured. Enter your voting code (or open your ticket page once to refresh the QR).",
+      );
+    }
     setError(null);
   }
 
@@ -180,8 +209,8 @@ export function VoteClient({
             <div className="space-y-3">
               <p className="text-sm font-extrabold text-[var(--ink)]">Your entry ticket</p>
               <p className="text-xs text-[var(--ink-soft)]">
-                Scan the same QR shown at the door, upload a photo of it, or paste the
-                ticket link. You still need your private voting code.
+                Scan or upload the same QR shown at the door — your voting code fills in
+                automatically when the ticket QR includes it. Paste backup still works.
               </p>
               <div className="flex flex-wrap gap-2">
                 <button

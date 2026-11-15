@@ -247,6 +247,7 @@ export async function softRemoveAttendee(args: SoftRemoveArgs): Promise<SoftRemo
           removedById: args.actorId,
           ticketToken: invalidatedToken,
           votingCredentialHash,
+          votingCredentialPlain: null,
           votingCredentialHint: null,
         },
       });
@@ -409,6 +410,7 @@ export async function softRestoreAttendee(args: SoftRestoreArgs): Promise<SoftRe
         status: TicketStatus.ISSUED,
         ticketToken,
         votingCredentialHash,
+        votingCredentialPlain: votingCredential,
         votingCredentialHint: votingCredential.slice(0, 2),
         issuedAt: attendee.issuedAt ?? new Date(),
         removedAt: null,
