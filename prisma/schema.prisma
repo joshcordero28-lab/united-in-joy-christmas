@@ -118,6 +118,9 @@ model Attendee {
   notes                String?
   ticketToken          String       @unique
   votingCredentialHash String
+  /// Plain voting code so ticket QR/links can embed it for Audience Choice autofill.
+  /// Only issued when the ticket is created/reissued; never logged.
+  votingCredentialPlain String?
   votingCredentialHint String?
   status               TicketStatus @default(ISSUED)
   registeredAt         DateTime     @default(now())

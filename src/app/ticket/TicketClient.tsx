@@ -16,9 +16,10 @@ type TicketView = {
   qr: string | null;
   link: string;
   staffRef: string;
+  votingCredential?: string | null;
 };
 
-function readTokenFromLocation(): string {
+function readRawFromLocation(): string {
   if (typeof window === "undefined") return "";
   const hash = window.location.hash.replace(/^#/, "").trim();
   if (hash) {
@@ -59,18 +60,27 @@ export function TicketClient() {
         setView(null);
         return;
       }
+      const viewData = data as TicketView;
       try {
         localStorage.setItem("uilc_ticket_token", cleaned);
+        if (viewData.votingCredential) {
+          localStorage.setItem("uilc_voting_credential", viewData.votingCredential);
+        }
       } catch {
         // ignore
       }
       setToken(cleaned);
-      setView(data as TicketView);
-      // Keep token in the hash only (never in the path) for shareable links.
-      if (typeof window !== "undefined") {
-        const nextHash = `#${encodeURIComponent(cleaned)}`;
-        if (window.location.hash !== nextHash) {
-          window.history.replaceState(null, "", `/ticket${nextHash}`);
+      setView(viewData);
+      // Prefer server link (may embed voting code for QR autofill).
+      if (typeof window !== "undefined" && viewData.link) {
+        try {
+          const u = new URL(viewData.link);
+          const next = `${u.pathname}${u.hash}`;
+          if (`${window.location.pathname}${window.location.hash}` !== next) {
+            window.history.replaceState(null, "", next);
+          }
+        } catch {
+          // ignore
         }
       }
     } catch {
@@ -82,7 +92,7 @@ export function TicketClient() {
   }
 
   useEffect(() => {
-    const initial = readTokenFromLocation();
+    const initial = readRawFromLocation();
     setPaste(initial);
     void loadTicket(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -195,6 +195,8 @@ export async function POST(request: Request) {
               notes: null,
               ticketToken,
               votingCredentialHash,
+              votingCredentialPlain:
+                status === TicketStatus.ISSUED ? votingCredential : null,
               votingCredentialHint: null,
               status,
               issuedAt: status === TicketStatus.ISSUED ? new Date() : null,
