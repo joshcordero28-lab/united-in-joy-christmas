@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
@@ -33,11 +33,18 @@ export function VoteClient({
   const [state, setState] = useState<VoteState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const html5Ref = useRef<{ stop: () => Promise<void> } | null>(null);
+  const readerId = useRef(`vote-qr-${Math.random().toString(36).slice(2, 9)}`);
 
   useEffect(() => {
     setTicketToken(localStorage.getItem("uilc_ticket_token") || "");
     setVotingCredential(localStorage.getItem("uilc_voting_credential") || "");
     refresh();
+    return () => {
+      html5Ref.current?.stop().catch(() => undefined);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only session restore
   }, []);
 
   async function refresh() {
@@ -56,19 +63,74 @@ export function VoteClient({
     }
   }
 
+  async function applyTicketScan(raw: string) {
+    const { extractTicketToken } = await import("@/lib/tickets");
+    const extracted = extractTicketToken(raw) || raw.trim();
+    setTicketToken(extracted);
+    setMessage("Ticket QR captured. Enter your voting code to continue.");
+    setError(null);
+  }
+
+  async function toggleScan() {
+    if (scanning) {
+      await html5Ref.current?.stop().catch(() => undefined);
+      html5Ref.current = null;
+      setScanning(false);
+      return;
+    }
+    setError(null);
+    setScanning(true);
+    try {
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const scanner = new Html5Qrcode(readerId.current);
+      html5Ref.current = scanner;
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 8, qrbox: { width: 220, height: 220 } },
+        async (decoded) => {
+          await scanner.stop().catch(() => undefined);
+          html5Ref.current = null;
+          setScanning(false);
+          await applyTicketScan(decoded);
+        },
+        () => undefined,
+      );
+    } catch {
+      setScanning(false);
+      setError("Camera could not start. Upload a QR image or paste your ticket link.");
+    }
+  }
+
+  async function onUpload(file: File | null) {
+    if (!file) return;
+    setError(null);
+    try {
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const scanner = new Html5Qrcode(`${readerId.current}-file`);
+      const decoded = await scanner.scanFile(file, false);
+      await applyTicketScan(decoded);
+    } catch {
+      setError("Could not read a ticket QR from that image.");
+    }
+  }
+
   async function login(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const { extractTicketToken } = await import("@/lib/tickets");
+    const token = extractTicketToken(ticketToken) || ticketToken.trim();
     const res = await fetch("/api/auth/voter/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticketToken, votingCredential }),
+      body: JSON.stringify({ ticketToken: token, votingCredential }),
     });
     const data = await res.json();
     if (!res.ok) {
       setError(data.error || "Login failed.");
       return;
     }
+    localStorage.setItem("uilc_ticket_token", token);
+    localStorage.setItem("uilc_voting_credential", votingCredential.trim());
     await refresh();
   }
 
@@ -115,17 +177,44 @@ export function VoteClient({
 
         {!loggedIn ? (
           <form onSubmit={login} className="panel mt-8 space-y-4 p-5">
-            <div>
-              <label className="label" htmlFor="ticketToken">
-                Ticket link
-              </label>
-              <textarea
-                id="ticketToken"
-                className="field min-h-24 font-mono text-sm"
-                value={ticketToken}
-                onChange={(e) => setTicketToken(e.target.value)}
-                required
-              />
+            <div className="space-y-3">
+              <p className="text-sm font-extrabold text-[var(--ink)]">Your entry ticket</p>
+              <p className="text-xs text-[var(--ink-soft)]">
+                Scan the same QR shown at the door, upload a photo of it, or paste the
+                ticket link. You still need your private voting code.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary !min-h-10 !text-sm"
+                  onClick={toggleScan}
+                >
+                  {scanning ? "Stop camera" : "Scan QR with camera"}
+                </button>
+                <label className="btn btn-secondary !min-h-10 !cursor-pointer !text-sm">
+                  Upload QR image
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => onUpload(e.target.files?.[0] || null)}
+                  />
+                </label>
+              </div>
+              <div id={readerId.current} className="overflow-hidden rounded-xl" />
+              <div>
+                <label className="label" htmlFor="ticketToken">
+                  Ticket link (backup)
+                </label>
+                <textarea
+                  id="ticketToken"
+                  className="field min-h-24 font-mono text-sm"
+                  value={ticketToken}
+                  onChange={(e) => setTicketToken(e.target.value)}
+                  placeholder="Paste ticket link or code"
+                  required
+                />
+              </div>
             </div>
             <div>
               <label className="label" htmlFor="votingCredential">
@@ -139,6 +228,9 @@ export function VoteClient({
                 required
               />
             </div>
+            {message && !error && (
+              <p className="text-sm font-semibold text-[var(--green)]">{message}</p>
+            )}
             {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" type="submit">
               Continue

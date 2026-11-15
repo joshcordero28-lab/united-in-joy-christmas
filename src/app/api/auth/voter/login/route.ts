@@ -6,9 +6,11 @@ import { getVoterSession } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
 import { getPublicVotingGate } from "@/lib/voting-public";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { parseAppTicketCredential } from "@/lib/tickets";
 
 const schema = z.object({
-  ticketToken: z.string().min(16).max(200),
+  /// Opaque token, ticket URL/QR payload, or hash link — parsed server-side.
+  ticketToken: z.string().min(8).max(500),
   votingCredential: z.string().min(4).max(40),
 });
 
@@ -31,10 +33,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid login details." }, { status: 400 });
     }
 
+    const ticketToken = parseAppTicketCredential(parsed.data.ticketToken);
+    if (ticketToken.length < 16) {
+      return NextResponse.json({ error: "Invalid ticket." }, { status: 401 });
+    }
+
     const event = await getEventConfig();
 
     const attendee = await prisma.attendee.findUnique({
-      where: { ticketToken: parsed.data.ticketToken },
+      where: { ticketToken },
     });
 
     if (!attendee || attendee.status !== "ISSUED") {
