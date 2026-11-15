@@ -65,6 +65,16 @@ export default async function HomePage() {
         />
       </section>
 
+      <section className="relative w-full overflow-hidden bg-[var(--red)]">
+        <Image
+          src="/brand/ccf-committee-banner-v2.jpg"
+          alt="A heart to serve for this Christmas Event 2026 — join a committee: Programs, Logistics, Prize Sponsors, Music, Kitchen, Ushers. Contact Joshua Rey Cordero."
+          width={1350}
+          height={1080}
+          className="mx-auto h-auto w-full max-w-5xl object-cover"
+        />
+      </section>
+
       <SiteFooter />
     </div>
   );
