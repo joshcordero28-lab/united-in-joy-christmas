@@ -127,16 +127,31 @@ export async function GET(request: Request) {
       where: { registrationPartyId: { in: partyIds } },
       select: {
         id: true,
+        fullName: true,
+        ticketNumber: true,
         registrationPartyId: true,
         status: true,
         checkedInAt: true,
+        checkInMethod: true,
         audienceVotes: { select: { id: true, voidedAt: true } },
       },
+      orderBy: { registeredAt: "asc" },
     });
 
     const partyStats = new Map<
       string,
       { eligible: number; used: number; remaining: number; attendeeCount: number }
+    >();
+    const partyMemberLists = new Map<
+      string,
+      {
+        id: string;
+        fullName: string;
+        ticketNumber: string | null;
+        status: string;
+        checkedInAt: Date | null;
+        checkInMethod: string | null;
+      }[]
     >();
     for (const m of partyMembers) {
       const cur = partyStats.get(m.registrationPartyId) || {
@@ -150,10 +165,21 @@ export async function GET(request: Request) {
       const eligible = attendeeIsEligible(m, event.votingEnabledAfterCheckIn);
       if (eligible) {
         cur.eligible += 1;
-        if (m.audienceVotes.length > 0) cur.used += 1;
+        if (m.audienceVotes.some((v) => !v.voidedAt)) cur.used += 1;
         else cur.remaining += 1;
       }
       partyStats.set(m.registrationPartyId, cur);
+
+      const list = partyMemberLists.get(m.registrationPartyId) || [];
+      list.push({
+        id: m.id,
+        fullName: m.fullName,
+        ticketNumber: m.ticketNumber,
+        status: m.status,
+        checkedInAt: m.checkedInAt,
+        checkInMethod: m.checkInMethod,
+      });
+      partyMemberLists.set(m.registrationPartyId, list);
     }
 
     return NextResponse.json({
@@ -188,6 +214,14 @@ export async function GET(request: Request) {
           partyUsed: stats?.used ?? 0,
           partyRemaining: stats?.remaining ?? 0,
           partyAttendeeCount: stats?.attendeeCount ?? 1,
+          partyMembers: (partyMemberLists.get(a.registrationPartyId) || []).map((m) => ({
+            id: m.id,
+            fullName: m.fullName,
+            ticketNumber: m.ticketNumber,
+            status: m.status,
+            checkedInAt: m.checkedInAt,
+            checkInMethod: m.checkInMethod,
+          })),
           voteCastBy: activeVote?.castBy ?? null,
           voteGroupName: activeVote?.group.groupName ?? null,
           hasVoidedBallot: Boolean(voidedVote),

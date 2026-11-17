@@ -52,6 +52,15 @@ type Dashboard = {
   }[];
 };
 
+type PartyMember = {
+  id: string;
+  fullName: string;
+  ticketNumber?: string | null;
+  status: string;
+  checkedInAt: string | null;
+  checkInMethod?: string | null;
+};
+
 type Attendee = {
   id: string;
   fullName: string;
@@ -62,6 +71,7 @@ type Attendee = {
   bookingRef?: string | null;
   ticketRef?: string | null;
   checkedInAt: string | null;
+  checkInMethod?: string | null;
   removedAt?: string | null;
   removalReason?: string | null;
   partyId?: string;
@@ -70,6 +80,7 @@ type Attendee = {
   partyUsed?: number;
   partyRemaining?: number;
   partyAttendeeCount?: number;
+  partyMembers?: PartyMember[];
   voteCastBy?: string | null;
   voteGroupName?: string | null;
   hasVoidedBallot?: boolean;
@@ -341,6 +352,154 @@ export default function OrganizerPage() {
     await loadAll(true);
   }
 
+  async function manualCheckIn(a: Attendee | PartyMember) {
+    setError(null);
+    setMessage(null);
+    if (a.status !== "ISSUED") {
+      setError("Only issued tickets can be checked in.");
+      return;
+    }
+    if (a.checkedInAt) {
+      setError(
+        `Already Checked In${a.checkInMethod ? ` (${a.checkInMethod})` : ""}${
+          a.checkedInAt ? ` at ${new Date(a.checkedInAt).toLocaleString()}` : ""
+        }.`,
+      );
+      return;
+    }
+    if (
+      !confirm(
+        `Check in “${a.fullName}” manually?\nTicket: ${"ticketNumber" in a ? a.ticketNumber || "n/a" : "n/a"}\n\nVerify identity before continuing.`,
+      )
+    ) {
+      return;
+    }
+    const res = await fetch("/api/checkin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ attendeeId: a.id, method: "manual" }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const when = data.checkedInAt || data.attendee?.checkedInAt;
+      const method = data.checkInMethod || data.attendee?.checkInMethod;
+      setError(
+        data.error === "Already Checked In" || res.status === 409
+          ? `Already Checked In${method ? ` via ${method}` : ""}${
+              when ? ` at ${new Date(when).toLocaleString()}` : ""
+            }.`
+          : data.error || "Manual check-in failed.",
+      );
+      await loadAll();
+      return;
+    }
+    setMessage(`Checked in: ${data.attendee.fullName} (manual).`);
+    await loadAll();
+  }
+
+  async function permanentDeleteAttendee(a: Attendee) {
+    setError(null);
+    setMessage(null);
+    const previewRes = await fetch(
+      `/api/organizer/attendees/permanent-delete?attendeeId=${encodeURIComponent(a.id)}`,
+    );
+    const previewData = await previewRes.json();
+    if (!previewRes.ok) {
+      setError(previewData.error || "Could not load permanent-delete preview.");
+      return;
+    }
+    const preview = previewData.preview as {
+      fullName: string;
+      ticketNumber: string | null;
+      ticketRef: string | null;
+      status: string;
+      checkedInAt: string | null;
+      checkInMethod: string | null;
+      checkInEventCount: number;
+      hasActiveVote: boolean;
+      voteGroupName: string | null;
+      voidedVoteCount: number;
+      partyOtherMembers: { fullName: string; status: string }[];
+      blockers: string[];
+      requiresPurgeConfirm: boolean;
+      requiresSoftRemoveFirst: boolean;
+      isTalentLeader: boolean;
+    };
+
+    if (preview.blockers?.length) {
+      setError(preview.blockers.join(" "));
+      return;
+    }
+
+    const reason = prompt(
+      [
+        `PERMANENT DELETE — cannot be undone from this dashboard.`,
+        `Name: ${preview.fullName}`,
+        `Ticket #: ${preview.ticketNumber || "n/a"} · ref ${preview.ticketRef || "n/a"}`,
+        `Status: ${preview.status}`,
+        preview.checkedInAt
+          ? `Checked in: yes (${preview.checkInMethod || "unknown"}) at ${preview.checkedInAt}`
+          : "Checked in: no",
+        preview.hasActiveVote
+          ? `Voted: yes (${preview.voteGroupName || "ballot"}) — soft-remove first`
+          : preview.voidedVoteCount
+            ? `Voted: voided ballot(s) on file (${preview.voidedVoteCount}) — will be snapshotted then purged`
+            : "Voted: no active ballot",
+        preview.partyOtherMembers?.length
+          ? `Group warning: ${preview.partyOtherMembers.length} other member(s) stay registered (${preview.partyOtherMembers
+              .map((m) => m.fullName)
+              .join(", ")})`
+          : "Solo registration (or last active member).",
+        "",
+        "Enter a reason (required):",
+      ].join("\n"),
+    );
+    if (!reason || reason.trim().length < 3) {
+      setError("Permanent delete cancelled — reason required.");
+      return;
+    }
+
+    const phrase = prompt(
+      `Type DELETE (all caps) to permanently delete “${preview.fullName}”.`,
+    );
+    if (phrase !== "DELETE") {
+      setError("Permanent delete cancelled — confirmation phrase must be DELETE.");
+      return;
+    }
+
+    let confirmPurgeHistory = false;
+    if (preview.requiresPurgeConfirm) {
+      const ok = confirm(
+        `This record has check-in / voided vote / competition history (${preview.checkInEventCount} check-in events, ${preview.voidedVoteCount} voided ballots). Continue? A non-sensitive snapshot is written to the audit log first. Other party members are NOT deleted.`,
+      );
+      if (!ok) {
+        setError("Permanent delete cancelled.");
+        return;
+      }
+      confirmPurgeHistory = true;
+    }
+
+    const res = await fetch("/api/organizer/attendees/permanent-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        attendeeId: a.id,
+        reason: reason.trim(),
+        confirmPhrase: "DELETE",
+        confirmPurgeHistory,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || "Permanent deletion failed.");
+      return;
+    }
+    setMessage(
+      `Permanently deleted ${data.fullName}. Preserved ${data.partyMembersPreserved} other party member(s).`,
+    );
+    await loadAll(true);
+  }
+
   async function groupAction(
     groupId: string,
     action: "approve" | "reject" | "withdraw" | "set_order" | "clear_member_review",
@@ -608,7 +767,9 @@ export default function OrganizerPage() {
                   <p className="text-sm text-[var(--ink-soft)]">
                     {a.status}
                     {a.ticketRef ? ` · ref ${a.ticketRef}` : ""}
-                    {a.checkedInAt ? " · checked in" : ""}
+                    {a.checkedInAt
+                      ? ` · checked in${a.checkInMethod ? ` (${a.checkInMethod})` : ""}`
+                      : ""}
                     {a.email ? ` · ${a.email}` : ""}
                     {a.ticketNumber ? ` · ${a.ticketNumber}` : ""}
                     {a.bookingRef ? ` · ${a.bookingRef}` : ""}
@@ -631,6 +792,32 @@ export default function OrganizerPage() {
                       ? ` · reason: ${a.removalReason}`
                       : ""}
                   </p>
+                  {a.partyMembers && a.partyMembers.length > 1 && (
+                    <ul className="mt-2 space-y-1 border-t border-[var(--red)]/10 pt-2 text-xs text-[var(--ink-soft)]">
+                      {a.partyMembers.map((m) => (
+                        <li key={m.id} className="flex flex-wrap items-center gap-2">
+                          <span>
+                            {m.fullName}
+                            {m.ticketNumber ? ` · ${m.ticketNumber}` : ""}
+                            {m.checkedInAt
+                              ? ` · checked in${m.checkInMethod ? ` (${m.checkInMethod})` : ""}`
+                              : " · not checked in"}
+                          </span>
+                          {m.id !== a.id &&
+                            m.status === "ISSUED" &&
+                            !m.checkedInAt && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary !min-h-8 !px-2 !text-xs"
+                                onClick={() => manualCheckIn(m)}
+                              >
+                                Check In Manually
+                              </button>
+                            )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {a.status === "PENDING" && (
@@ -642,20 +829,43 @@ export default function OrganizerPage() {
                       Approve
                     </button>
                   )}
-                  {a.status === "REMOVED" ? (
+                  {a.status === "ISSUED" && !a.checkedInAt && (
                     <button
                       type="button"
                       className="btn btn-primary !min-h-10 !px-3 !text-sm"
-                      onClick={() => restoreAttendee(a)}
+                      onClick={() => manualCheckIn(a)}
                     >
-                      Restore
+                      Check In Manually
                     </button>
+                  )}
+                  {a.status === "REMOVED" ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-primary !min-h-10 !px-3 !text-sm"
+                        onClick={() => restoreAttendee(a)}
+                      >
+                        Restore
+                      </button>
+                      <details className="rounded-xl border border-[var(--red)]/20 px-2 py-1 text-sm">
+                        <summary className="cursor-pointer font-semibold text-[var(--red)]">
+                          Admin actions
+                        </summary>
+                        <button
+                          type="button"
+                          className="btn btn-danger mt-2 !min-h-10 !px-3 !text-sm"
+                          onClick={() => permanentDeleteAttendee(a)}
+                        >
+                          Permanently Delete
+                        </button>
+                      </details>
+                    </>
                   ) : (
                     <>
                       {a.status !== "REVOKED" && (
                         <button
                           type="button"
-                          className="btn btn-danger !min-h-10 !px-3 !text-sm"
+                          className="btn btn-secondary !min-h-10 !px-3 !text-sm"
                           onClick={() => removeAttendee(a)}
                         >
                           Remove attendee
@@ -686,6 +896,18 @@ export default function OrganizerPage() {
                       >
                         Replace QR
                       </button>
+                      <details className="rounded-xl border border-[var(--red)]/20 px-2 py-1 text-sm">
+                        <summary className="cursor-pointer font-semibold text-[var(--red)]">
+                          Admin actions
+                        </summary>
+                        <button
+                          type="button"
+                          className="btn btn-danger mt-2 !min-h-10 !px-3 !text-sm"
+                          onClick={() => permanentDeleteAttendee(a)}
+                        >
+                          Permanently Delete
+                        </button>
+                      </details>
                     </>
                   )}
                 </div>
