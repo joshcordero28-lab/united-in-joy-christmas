@@ -6,6 +6,8 @@ import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { CcfMark } from "@/components/CcfMark";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
+import { ManageMyTicketsLink } from "@/components/ManageMyTicketsLink";
+import { storeManagerToken } from "@/lib/manage-session";
 
 type LookupMode = "booking" | "ticket";
 
@@ -67,7 +69,6 @@ export default function FindTicketsPage() {
   const [error, setError] = useState<string | null>(null);
   const [ticket, setTicket] = useState<TicketResult | null>(null);
   const [booking, setBooking] = useState<BookingResult | null>(null);
-  const [openedManagerHash, setOpenedManagerHash] = useState("");
 
   const hasResult = Boolean(ticket || booking);
 
@@ -84,7 +85,6 @@ export default function FindTicketsPage() {
     setError(null);
     setTicket(null);
     setBooking(null);
-    setOpenedManagerHash("");
 
     try {
       let body: Record<string, string>;
@@ -113,12 +113,11 @@ export default function FindTicketsPage() {
         const result = data as BookingResult;
         setBooking(result);
         const hash = managerHashFromLink(result.manageLink);
-        setOpenedManagerHash(hash);
         if (hash) {
           try {
-            localStorage.setItem("uilc_manager_token", decodeURIComponent(hash));
+            storeManagerToken(decodeURIComponent(hash));
           } catch {
-            // ignore
+            storeManagerToken(hash);
           }
         }
       } else {
@@ -149,7 +148,6 @@ export default function FindTicketsPage() {
     setTicket(null);
     setBooking(null);
     setError(null);
-    setOpenedManagerHash("");
   }
 
   return (
@@ -313,12 +311,14 @@ export default function FindTicketsPage() {
                 {booking.totalAttendees} ticket{booking.totalAttendees === 1 ? "" : "s"} ·{" "}
                 {booking.checkedInCount} checked in · {booking.dateLabel}
               </p>
-              <Link
+              <ManageMyTicketsLink
                 className="btn btn-primary w-full"
-                href={`/manage#${openedManagerHash || managerHashFromLink(booking.manageLink)}`}
-              >
-                Open group ticket dashboard
-              </Link>
+                hrefOverride="/manage"
+                label="Manage My Tickets"
+              />
+              <p className="text-xs text-[var(--ink-soft)]">
+                Access stays on this device — the booking code is not added to the page URL.
+              </p>
             </div>
             <ul className="space-y-2">
               {booking.attendees.map((a) => (

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CcfMark } from "./CcfMark";
+import { ManageMyTicketsLink } from "./ManageMyTicketsLink";
 
 /** Presentational header — no server data fetching. */
 export function SiteHeaderView({
@@ -29,9 +30,7 @@ export function SiteHeaderView({
           <Link className={link} href="/register">
             Register
           </Link>
-          <Link className={link} href="/find">
-            Find tickets
-          </Link>
+          <ManageMyTicketsLink className={link}>Manage My Tickets</ManageMyTicketsLink>
           <Link className={link} href="/competitions">
             Talent Show
           </Link>

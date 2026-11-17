@@ -4,6 +4,8 @@ import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
 import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
+import { ManageMyTicketsLink } from "@/components/ManageMyTicketsLink";
+import { storeManagerToken } from "@/lib/manage-session";
 
 type AttendeeResult = {
   id: string;
@@ -114,7 +116,7 @@ export default function RegisterPage() {
       }
       setResult(data);
       if (data.managerToken) {
-        localStorage.setItem("uilc_manager_token", data.managerToken);
+        storeManagerToken(data.managerToken);
       }
       const firstTicket = data.attendees?.find((a: AttendeeResult) => a.ticketToken);
       if (firstTicket?.ticketToken) {
@@ -338,20 +340,19 @@ export default function RegisterPage() {
               <>
                 <p className="rounded-xl border border-[var(--gold)]/40 bg-white/70 p-3 text-sm">
                   <span className="font-extrabold text-[var(--red)]">
-                    View all tickets (private booking link)
+                    Your tickets are ready
                   </span>
                   <span className="mt-1 block text-xs font-normal text-[var(--ink-soft)]">
-                    Keep this link private. It opens the group ticket dashboard for booking{" "}
-                    {result.bookingRef || "this registration"}. It is not a door ticket —
-                    each person still uses their own QR at check-in.
+                    Open the group dashboard on this device to see every QR. Booking{" "}
+                    {result.bookingRef || "reference"} — each person still uses their own QR
+                    at check-in.
                   </span>
                 </p>
-                <Link
+                <ManageMyTicketsLink
                   className="btn btn-primary w-full"
-                  href={`/manage#${encodeURIComponent(result.managerToken)}`}
-                >
-                  {result.attendees.length > 1 ? "View all tickets" : "Open booking dashboard"}
-                </Link>
+                  hrefOverride="/manage"
+                  label="View All My Tickets"
+                />
               </>
             )}
 

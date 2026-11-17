@@ -5,6 +5,7 @@ import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
 import { CcfMark } from "@/components/CcfMark";
+import { ManageMyTicketsLink } from "@/components/ManageMyTicketsLink";
 import { extractTicketToken } from "@/lib/tickets";
 
 type TicketView = {
@@ -144,15 +145,13 @@ export function TicketClient() {
                     Part of a {view.partySize}-person booking
                   </p>
                   <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                    This page shows only your entry QR. Open the private booking link (or Find
-                    tickets with your booking reference + access code) to see everyone.
+                    This page shows only your entry QR. Use View Group Booking to open every
+                    ticket when you have access on this device, or verify with your booking
+                    reference.
                   </p>
-                  <a
-                    className="mt-2 inline-flex font-extrabold text-[var(--red)] underline"
-                    href="/find"
-                  >
-                    Find group tickets
-                  </a>
+                  <ManageMyTicketsLink className="btn btn-secondary mt-3 !min-h-10 w-full !text-sm">
+                    View Group Booking
+                  </ManageMyTicketsLink>
                 </div>
               )}
 
@@ -240,9 +239,9 @@ export function TicketClient() {
               </button>
               <p className="text-center text-sm text-[var(--ink-soft)]">
                 Looking for every ticket in a booking?{" "}
-                <a href="/find" className="font-semibold text-[var(--red)] underline">
-                  Find tickets
-                </a>
+                <ManageMyTicketsLink className="font-semibold text-[var(--red)] underline">
+                  Manage My Tickets
+                </ManageMyTicketsLink>
               </p>
             </form>
           </>

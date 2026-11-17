@@ -107,7 +107,10 @@ async function main() {
       !/\b(King|Queen)\b|Audience Choice|Vote for Your Favorite|ballot/i.test(html),
       "Home must not mention voting/King/Queen",
     );
+    assert(/Manage My Tickets/i.test(html), "Home must show Manage My Tickets CTA");
+    assert(/Register for a ticket/i.test(html), "Home must keep Register CTA");
     pass("Home page loads without public voting copy");
+    pass("Home shows Manage My Tickets near Register");
   }
 
   const { res: voteHidden } = await req("/api/vote");

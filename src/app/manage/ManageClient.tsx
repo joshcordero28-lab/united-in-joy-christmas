@@ -5,6 +5,10 @@ import Link from "next/link";
 import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { CcfMark } from "@/components/CcfMark";
+import {
+  MANAGER_TOKEN_STORAGE_KEY,
+  storeManagerToken,
+} from "@/lib/manage-session";
 
 type AttendeeRow = {
   id: string;
@@ -79,7 +83,7 @@ function readManagerToken(): string {
       return hash;
     }
   }
-  return localStorage.getItem("uilc_manager_token") || "";
+  return localStorage.getItem(MANAGER_TOKEN_STORAGE_KEY) || "";
 }
 
 function extractTokenFromPaste(raw: string): string {
@@ -131,7 +135,7 @@ export function ManageClient() {
       setError(data.error || "Could not open management page.");
       return;
     }
-    localStorage.setItem("uilc_manager_token", managerToken);
+    storeManagerToken(managerToken);
     setState(data);
     setAlloc({});
     setConfirming(false);
