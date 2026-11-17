@@ -305,3 +305,13 @@ model RateLimitBucket {
   windowStart DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+/// Client idempotency keys for registration (prevents double-submit duplicates).
+model IdempotencyRecord {
+  id           String   @id
+  responseJson String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([createdAt])
+}

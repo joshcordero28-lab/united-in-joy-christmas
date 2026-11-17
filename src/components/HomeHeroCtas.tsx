@@ -11,7 +11,7 @@ export function HomeHeroCtas() {
         Register for a ticket
       </Link>
       <ManageMyTicketsLink className="btn btn-secondary">
-        Manage My Tickets
+        Find My Tickets
       </ManageMyTicketsLink>
     </div>
   );

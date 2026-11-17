@@ -8,10 +8,19 @@ import {
   generateVotingCredential,
   hashVotingCredential,
 } from "@/lib/crypto";
+import { ticketUrl, qrDataUrl } from "@/lib/tickets";
+import { ticketStaffRef } from "@/lib/attendee-removal";
 
 const schema = z.object({
   attendeeId: z.string().min(1),
-  action: z.enum(["approve", "revoke", "reissue"]),
+  /**
+   * approve / revoke — unchanged.
+   * resend — re-share existing ticket (same QR / ticket number / booking).
+   * replace_qr — rotate QR + voting credential for compromise (same attendee row).
+   * reissue — legacy alias for replace_qr (kept for older clients).
+   */
+  action: z.enum(["approve", "revoke", "resend", "replace_qr", "reissue"]),
+  reason: z.string().trim().min(3).max(300).optional(),
 });
 
 export async function POST(request: Request) {
@@ -29,8 +38,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid action." }, { status: 400 });
     }
 
+    const action =
+      parsed.data.action === "reissue" ? "replace_qr" : parsed.data.action;
+
     const attendee = await prisma.attendee.findUnique({
       where: { id: parsed.data.attendeeId },
+      include: {
+        registrationParty: { select: { bookingRef: true, id: true } },
+        audienceVotes: { select: { id: true, voidedAt: true } },
+      },
     });
     if (!attendee) {
       return NextResponse.json({ error: "Not found." }, { status: 404 });
@@ -39,7 +55,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "This attendee was soft-removed. Use Restore (not approve/revoke/reissue) to bring them back.",
+            "This attendee was soft-removed. Use Restore (not approve/revoke/resend/replace) to bring them back.",
         },
         { status: 409 },
       );
@@ -47,8 +63,10 @@ export async function POST(request: Request) {
 
     let votingCredential: string | null = null;
     let ticketToken: string | null = null;
+    let qrRotated = false;
+    const baseUrl = process.env.APP_BASE_URL || "http://127.0.0.1:3000";
 
-    if (parsed.data.action === "approve") {
+    if (action === "approve") {
       if (attendee.status !== "PENDING") {
         return NextResponse.json({ error: "Only pending tickets can be approved." }, { status: 409 });
       }
@@ -64,7 +82,15 @@ export async function POST(request: Request) {
           votingCredentialPlain: votingCredential,
         },
       });
-    } else if (parsed.data.action === "revoke") {
+      await writeAudit({
+        actorId: session.staffId,
+        actorLabel: session.username,
+        action: "attendee.approve",
+        entityType: "Attendee",
+        entityId: attendee.id,
+        detail: `ticketNumber=${attendee.ticketNumber}`,
+      });
+    } else if (action === "revoke") {
       await prisma.attendee.update({
         where: { id: attendee.id },
         data: {
@@ -73,7 +99,51 @@ export async function POST(request: Request) {
           votingCredentialPlain: null,
         },
       });
-    } else if (parsed.data.action === "reissue") {
+      await writeAudit({
+        actorId: session.staffId,
+        actorLabel: session.username,
+        action: "attendee.revoke",
+        entityType: "Attendee",
+        entityId: attendee.id,
+        detail: `ticketNumber=${attendee.ticketNumber}`,
+      });
+    } else if (action === "resend") {
+      // Re-issue / re-send existing ticket: same attendee, same QR, same ticket number.
+      if (attendee.status !== "ISSUED") {
+        return NextResponse.json(
+          { error: "Only issued tickets can be re-sent. Approve pending tickets first, or restore removed ones." },
+          { status: 409 },
+        );
+      }
+      ticketToken = attendee.ticketToken;
+      votingCredential = attendee.votingCredentialPlain;
+      await writeAudit({
+        actorId: session.staffId,
+        actorLabel: session.username,
+        action: "attendee.resend",
+        entityType: "Attendee",
+        entityId: attendee.id,
+        detail: [
+          `ticketNumber=${attendee.ticketNumber}`,
+          `bookingRef=${attendee.registrationParty.bookingRef}`,
+          `ticketRef=${ticketStaffRef(attendee.ticketToken)}`,
+          "qrUnchanged",
+          "noNewVoteEntitlement",
+        ].join("; "),
+      });
+    } else if (action === "replace_qr") {
+      const reason = (parsed.data.reason || "").trim();
+      if (reason.length < 3) {
+        return NextResponse.json(
+          {
+            error:
+              "Replacing a QR requires a reason (lost/compromised). This invalidates the previous QR.",
+            code: "reason_required",
+          },
+          { status: 400 },
+        );
+      }
+      const previousRef = ticketStaffRef(attendee.ticketToken);
       ticketToken = generateOpaqueToken(32);
       votingCredential = generateVotingCredential();
       const votingCredentialHash = await hashVotingCredential(votingCredential);
@@ -84,24 +154,60 @@ export async function POST(request: Request) {
           votingCredentialHash,
           votingCredentialPlain: votingCredential,
           status: "ISSUED",
-          issuedAt: new Date(),
+          issuedAt: attendee.issuedAt ?? new Date(),
           revokedAt: null,
         },
       });
+      qrRotated = true;
+      await writeAudit({
+        actorId: session.staffId,
+        actorLabel: session.username,
+        action: "attendee.replace_qr",
+        entityType: "Attendee",
+        entityId: attendee.id,
+        detail: [
+          `reason=${reason}`,
+          `ticketNumber=${attendee.ticketNumber}`,
+          `bookingRef=${attendee.registrationParty.bookingRef}`,
+          `previousTicketRef=${previousRef}`,
+          `newTicketRef=${ticketStaffRef(ticketToken)}`,
+          "sameAttendeeRow",
+          "checkInPreserved",
+          "votesPreserved",
+          "noExtraVoteEntitlement",
+        ].join("; "),
+      });
     }
 
-    await writeAudit({
-      actorId: session.staffId,
-      actorLabel: session.username,
-      action: `attendee.${parsed.data.action}`,
-      entityType: "Attendee",
-      entityId: attendee.id,
-    });
+    const link =
+      ticketToken && (action === "resend" || action === "replace_qr" || action === "approve")
+        ? ticketUrl(baseUrl, ticketToken, votingCredential)
+        : null;
+    const qr = link ? await qrDataUrl(link) : null;
+
+    const hasActiveVote = attendee.audienceVotes.some((v) => !v.voidedAt);
 
     return NextResponse.json({
       ok: true,
+      action,
+      attendeeId: attendee.id,
+      fullName: attendee.fullName,
+      ticketNumber: attendee.ticketNumber,
+      bookingRef: attendee.registrationParty.bookingRef,
       ticketToken,
       votingCredential,
+      ticketRef: ticketToken ? ticketStaffRef(ticketToken) : null,
+      link,
+      qr,
+      qrRotated,
+      checkedInAt: attendee.checkedInAt,
+      hasActiveVote,
+      message:
+        action === "resend"
+          ? "Existing ticket re-sent — same QR and ticket number. No new attendee created."
+          : action === "replace_qr"
+            ? "QR replaced — previous QR is invalid. Same attendee, check-in, and votes preserved."
+            : `Action ${action} complete.`,
     });
   } catch (err) {
     console.error("attendee action failed", err);

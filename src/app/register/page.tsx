@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
@@ -23,10 +23,19 @@ type RegisterResult = {
   managerToken: string | null;
   status: string;
   attendees: AttendeeResult[];
+  attendeeCount?: number;
   message: string;
 };
 
 type Mode = "solo" | "group";
+
+function newIdempotencyKey(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `idem_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+}
 
 export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
@@ -36,6 +45,11 @@ export default function RegisterPage() {
   const [managerName, setManagerName] = useState("");
   const [includeSelf, setIncludeSelf] = useState(true);
   const [extraNames, setExtraNames] = useState<string[]>([""]);
+  const [duplicatePrompt, setDuplicatePrompt] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const idempotencyKeyRef = useRef(newIdempotencyKey());
+  const submittingRef = useRef(false);
+  const lastPayloadRef = useRef<Record<string, unknown> | null>(null);
 
   const previewAttendees = useMemo(() => {
     const names: string[] = [];
@@ -56,7 +70,6 @@ export default function RegisterPage() {
   }
 
   function addExtra() {
-    // Server max is 8 attendees total (including the primary when attending).
     const selfSlot = includeSelf ? 1 : 0;
     if (selfSlot + extraNames.filter((n) => n.trim()).length >= 8) return;
     if (extraNames.length >= 8) return;
@@ -70,6 +83,7 @@ export default function RegisterPage() {
   function switchMode(next: Mode) {
     setMode(next);
     setError(null);
+    setDuplicatePrompt(false);
     if (next === "solo") {
       setIncludeSelf(true);
       setExtraNames([""]);
@@ -78,14 +92,23 @@ export default function RegisterPage() {
     }
   }
 
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function copyText(label: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      setError("Could not copy — select the text manually.");
+    }
+  }
+
+  async function submitRegistration(opts: { confirmNewPerson?: boolean } = {}) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
     setError(null);
-    const form = new FormData(e.currentTarget);
-    const name = managerName.trim();
-    const attendees = previewAttendees.map((fullName) => ({ fullName }));
 
+    const attendees = previewAttendees.map((fullName) => ({ fullName }));
     if (attendees.length < 1) {
       setError(
         mode === "solo"
@@ -93,27 +116,66 @@ export default function RegisterPage() {
           : "Add at least one attendee, or include yourself as attending.",
       );
       setLoading(false);
+      submittingRef.current = false;
       return;
     }
 
+    const form = document.getElementById("register-form") as HTMLFormElement | null;
+    const fd = form ? new FormData(form) : new FormData();
+
+    const payload = {
+      managerName: managerName.trim(),
+      phone: fd.get("phone") || "",
+      email: fd.get("email") || "",
+      notes: fd.get("notes") || "",
+      attendees,
+      company: fd.get("company") || "",
+      idempotencyKey: idempotencyKeyRef.current,
+      confirmNewPerson: Boolean(opts.confirmNewPerson),
+    };
+    lastPayloadRef.current = payload;
+
     try {
+      // Soft probe (does not create tickets)
+      if (!opts.confirmNewPerson) {
+        const probe = await fetch("/api/register/check-duplicate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const probeData = await probe.json();
+        if (probe.ok && probeData.possibleDuplicate) {
+          setDuplicatePrompt(true);
+          setError(probeData.message || "It looks like you may already be registered.");
+          setLoading(false);
+          submittingRef.current = false;
+          return;
+        }
+      }
+
       const res = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          managerName: name,
-          phone: form.get("phone"),
-          email: form.get("email"),
-          notes: form.get("notes"),
-          attendees,
-          company: form.get("company"),
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) {
+        if (data.code === "possible_duplicate") {
+          setDuplicatePrompt(true);
+          setError(
+            data.error ||
+              "It looks like you may already be registered for United in Joy Christmas 2026.",
+          );
+          return;
+        }
         setError(data.error || "Registration failed.");
+        // New key only when the request failed for a non-idempotent reason
+        if (res.status >= 500) {
+          idempotencyKeyRef.current = newIdempotencyKey();
+        }
         return;
       }
+      setDuplicatePrompt(false);
       setResult(data);
       if (data.managerToken) {
         storeManagerToken(data.managerToken);
@@ -123,11 +185,19 @@ export default function RegisterPage() {
         localStorage.setItem("uilc_ticket_token", firstTicket.ticketToken);
         localStorage.setItem("uilc_voting_credential", firstTicket.votingCredential || "");
       }
+      // Next fresh registration gets a new key
+      idempotencyKeyRef.current = newIdempotencyKey();
     } catch {
       setError("Network error. Please try again.");
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
+  }
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    await submitRegistration();
   }
 
   return (
@@ -138,11 +208,15 @@ export default function RegisterPage() {
         <h1 className="brand-mark text-4xl text-[var(--red)] sm:text-5xl">Register</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
           Get entry tickets with QR codes for the door. One person can register just
-          themselves, or several people in one submission.
+          themselves, or several people in one submission. Already registered?{" "}
+          <ManageMyTicketsLink className="font-semibold text-[var(--red)] underline">
+            Find My Tickets
+          </ManageMyTicketsLink>
+          .
         </p>
 
         {!result ? (
-          <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
+          <form id="register-form" onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
             <fieldset className="space-y-2">
               <legend className="label !mb-2">Who are you registering?</legend>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -277,12 +351,6 @@ export default function RegisterPage() {
                   ))}
                 </ol>
               )}
-              {mode === "group" && (
-                <p className="mt-2 text-xs text-[var(--ink-soft)]">
-                  Contact details above are collected once for the registration manager. Each
-                  listed person gets their own QR ticket.
-                </p>
-              )}
             </div>
 
             <div>
@@ -305,59 +373,118 @@ export default function RegisterPage() {
               <label htmlFor="company">Company</label>
               <input id="company" name="company" type="text" tabIndex={-1} autoComplete="off" />
             </div>
-            {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
-            <button className="btn btn-primary w-full" disabled={loading} type="submit">
-              {loading
-                ? "Registering…"
-                : mode === "solo"
-                  ? "Get my entry ticket"
-                  : `Complete registration (${previewAttendees.length})`}
-            </button>
+
+            {error && !duplicatePrompt && (
+              <p className="font-semibold text-[var(--red)]">{error}</p>
+            )}
+
+            {duplicatePrompt && (
+              <div className="space-y-3 rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-4">
+                <p className="font-extrabold text-[var(--red)]">
+                  It looks like you may already be registered for United in Joy Christmas 2026.
+                </p>
+                <p className="text-sm text-[var(--ink-soft)]">
+                  Recover your existing tickets instead of creating a duplicate. We do not show
+                  another person&apos;s booking details here.
+                </p>
+                <ManageMyTicketsLink className="btn btn-primary w-full">
+                  Find My Existing Ticket
+                </ManageMyTicketsLink>
+                <button
+                  type="button"
+                  className="btn btn-secondary w-full"
+                  disabled={loading}
+                  onClick={() => void submitRegistration({ confirmNewPerson: true })}
+                >
+                  This Is Someone Else — Continue Registration
+                </button>
+              </div>
+            )}
+
+            {!duplicatePrompt && (
+              <button className="btn btn-primary w-full" disabled={loading} type="submit">
+                {loading
+                  ? "Registering…"
+                  : mode === "solo"
+                    ? "Get my entry ticket"
+                    : `Complete registration (${previewAttendees.length})`}
+              </button>
+            )}
           </form>
         ) : (
           <div className="panel mt-8 space-y-4 p-5">
-            <h2 className="brand-mark text-3xl text-[var(--red)]">
-              You&apos;re in, {result.managerName}!
-            </h2>
+            <h2 className="brand-mark text-3xl text-[var(--red)]">Registration Successful!</h2>
             <p className="text-[var(--ink-soft)]">{result.message}</p>
 
             {result.bookingRef && (
               <div className="rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-4">
                 <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[var(--red)]">
-                  Booking reference
+                  Your booking reference
                 </p>
                 <p className="mt-1 font-mono text-2xl font-extrabold tracking-wide">
                   {result.bookingRef}
                 </p>
-                <p className="mt-2 text-xs text-[var(--ink-soft)]">
-                  Save this reference. With your private booking link you can reopen every
-                  ticket later.
+                <p className="mt-2 text-sm text-[var(--ink-soft)]">
+                  You can retrieve your tickets anytime using your booking reference. You do not
+                  need to register again.
                 </p>
+                {(result.attendeeCount || result.attendees?.length || 0) > 1 && (
+                  <p className="mt-2 text-sm font-semibold text-[var(--green)]">
+                    {result.attendeeCount || result.attendees.length} attendees included in this
+                    booking.
+                  </p>
+                )}
               </div>
             )}
 
-            {result.managerToken && (
-              <>
-                <p className="rounded-xl border border-[var(--gold)]/40 bg-white/70 p-3 text-sm">
-                  <span className="font-extrabold text-[var(--red)]">
-                    Your tickets are ready
-                  </span>
-                  <span className="mt-1 block text-xs font-normal text-[var(--ink-soft)]">
-                    Open the group dashboard on this device to see every QR. Booking{" "}
-                    {result.bookingRef || "reference"} — each person still uses their own QR
-                    at check-in.
-                  </span>
-                </p>
-                <ManageMyTicketsLink
-                  className="btn btn-primary w-full"
-                  hrefOverride="/manage"
-                  label="View All My Tickets"
-                />
-              </>
-            )}
+            <div className="flex flex-col gap-2">
+              {result.managerToken && (
+                <ManageMyTicketsLink className="btn btn-primary w-full" hrefOverride="/manage">
+                  View All My Tickets
+                </ManageMyTicketsLink>
+              )}
+              {result.bookingRef && (
+                <button
+                  type="button"
+                  className="btn btn-secondary w-full"
+                  onClick={() => copyText("ref", result.bookingRef!)}
+                >
+                  {copied === "ref" ? "Copied!" : "Copy Booking Reference"}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary w-full"
+                onClick={() => window.print()}
+              >
+                Download / Print Tickets
+              </button>
+              {result.managerToken && (
+                <button
+                  type="button"
+                  className="btn btn-secondary w-full"
+                  onClick={() => {
+                    const lines = [
+                      `United in Joy Christmas 2026`,
+                      `Booking: ${result.bookingRef || ""}`,
+                      `Manager: ${result.managerName}`,
+                      `Attendees: ${result.attendees?.length || 0}`,
+                      ...(result.attendees || []).map(
+                        (a) => `- ${a.fullName}${a.ticketNumber ? ` (${a.ticketNumber})` : ""}`,
+                      ),
+                      "",
+                      "Retrieve tickets with your booking reference + private booking link. Do not register again.",
+                    ];
+                    void copyText("details", lines.join("\n"));
+                  }}
+                >
+                  {copied === "details" ? "Copied!" : "Save Ticket Details"}
+                </button>
+              )}
+            </div>
 
             {result.attendees?.some((a) => a.ticketToken) && (
-              <div className="space-y-3">
+              <div className="space-y-3 print:block">
                 <p className="text-sm font-extrabold text-[var(--red)]">
                   {result.attendees.length > 1 ? "All entry tickets" : "Entry ticket"}
                 </p>
@@ -373,12 +500,6 @@ export default function RegisterPage() {
                           {a.ticketNumber}
                         </p>
                       )}
-                      <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                        Private guest code:{" "}
-                        <strong className="font-mono tracking-wider text-[var(--red)]">
-                          {a.votingCredential}
-                        </strong>
-                      </p>
                       <Link
                         className="mt-2 inline-flex font-extrabold text-[var(--red)] underline"
                         href={

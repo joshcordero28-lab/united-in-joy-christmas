@@ -66,6 +66,7 @@ async function main() {
           { id: { startsWith: "register:" } },
           { id: { startsWith: "register-day:" } },
           { id: { startsWith: "register-seats:" } },
+          { id: { startsWith: "register-dup:" } },
           { id: { startsWith: "group-register:" } },
           { id: { startsWith: "ticket-verify:" } },
           { id: { startsWith: "from-ticket:" } },
@@ -107,10 +108,10 @@ async function main() {
       !/\b(King|Queen)\b|Audience Choice|Vote for Your Favorite|ballot/i.test(html),
       "Home must not mention voting/King/Queen",
     );
-    assert(/Manage My Tickets/i.test(html), "Home must show Manage My Tickets CTA");
+    assert(/Find My Tickets/i.test(html), "Home must show Find My Tickets CTA");
     assert(/Register for a ticket/i.test(html), "Home must keep Register CTA");
     pass("Home page loads without public voting copy");
-    pass("Home shows Manage My Tickets near Register");
+    pass("Home shows Find My Tickets near Register");
   }
 
   const { res: voteHidden } = await req("/api/vote");
@@ -136,9 +137,11 @@ async function main() {
   pass("Public nav omits Audience Choice while hidden");
 
   const stamp = Date.now();
+  /** Unique per run so duplicate-prevention does not block regression re-runs. */
+  const phoneOf = (n: number) => `9${String(stamp).slice(-8)}${String(n).padStart(1, "0")}`;
   const { res: r1, json: a } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: `Alex Talent ${stamp}`, phone: "555-0101" }),
+    body: JSON.stringify({ fullName: `Alex Talent ${stamp}`, phone: phoneOf(1) }),
   });
   assert(r1.ok, `Register A failed: ${JSON.stringify(a)}`);
   const tokenA = String(a.ticketToken);
@@ -147,14 +150,14 @@ async function main() {
 
   const { json: b } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: `Blake Talent ${stamp}`, phone: "555-0102" }),
+    body: JSON.stringify({ fullName: `Blake Talent ${stamp}`, phone: phoneOf(2) }),
   });
   const tokenB = String(b.ticketToken);
   const idB = String(b.attendeeId);
 
   const { json: cExtra } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: `Chris Talent ${stamp}`, phone: "555-0103" }),
+    body: JSON.stringify({ fullName: `Chris Talent ${stamp}`, phone: phoneOf(3) }),
   });
   const tokenC = String(cExtra.ticketToken);
   const idC = String(cExtra.attendeeId);
@@ -521,7 +524,7 @@ async function main() {
     method: "POST",
     body: JSON.stringify({
       managerName: `Jordan Manager ${stamp}`,
-      phone: "555-0199",
+      phone: phoneOf(4),
       attendees: [
         { fullName: `Jordan Manager ${stamp}` },
         { fullName: `Sam Guest ${stamp}` },
@@ -798,7 +801,7 @@ async function main() {
   }
   const { res: soloRes, json: solo } = await req("/api/register", {
     method: "POST",
-    body: JSON.stringify({ fullName: `Solo Legacy ${stamp}`, phone: "555-0000" }),
+    body: JSON.stringify({ fullName: `Solo Legacy ${stamp}`, phone: phoneOf(5) }),
   });
   assert(soloRes.ok && solo.ticketToken && solo.managerToken, "Solo registration still works");
   assert(solo.attendees.length === 1, "Solo maps to party of one");

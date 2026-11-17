@@ -12,7 +12,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "test:flow": "tsx scripts/test-flow.ts",
-    "test:group-tickets": "tsx scripts/test-group-tickets.ts"
+    "test:group-tickets": "tsx scripts/test-group-tickets.ts",
+    "test:duplicate-recovery": "tsx scripts/test-duplicate-recovery.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

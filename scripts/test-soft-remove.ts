@@ -195,18 +195,22 @@ async function main() {
 
     // Login as voter and cast
     const voterJar: Jar = new Map();
-    // Need voting credential — reissue to get one
+    // Need voting credential — replace QR (legacy reissue) to mint a known code for the test
     const { res: reis, json: reisJson } = await req("/api/organizer/attendees/action", {
       method: "POST",
       jar: orgJar,
-      body: JSON.stringify({ attendeeId: voted.id, action: "reissue" }),
+      body: JSON.stringify({
+        attendeeId: voted.id,
+        action: "replace_qr",
+        reason: "test harness needs voting credential",
+      }),
     });
-    assert(reis.ok, `Reissue voted: ${JSON.stringify(reisJson)}`);
+    assert(reis.ok, `Replace QR voted: ${JSON.stringify(reisJson)}`);
     const votingCredential = String(reisJson.votingCredential);
     const newTicket = String(reisJson.ticketToken);
     voted.ticketToken = newTicket;
 
-    // Re-check-in after reissue (token rotated)
+    // Re-check-in after QR replace (token rotated)
     await req("/api/checkin", {
       method: "POST",
       jar: staffJar,

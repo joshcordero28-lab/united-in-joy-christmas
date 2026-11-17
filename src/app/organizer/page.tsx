@@ -58,6 +58,8 @@ type Attendee = {
   phone: string | null;
   email: string | null;
   status: string;
+  ticketNumber?: string | null;
+  bookingRef?: string | null;
   ticketRef?: string | null;
   checkedInAt: string | null;
   removedAt?: string | null;
@@ -113,6 +115,21 @@ export default function OrganizerPage() {
   >([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [dupClusters, setDupClusters] = useState<
+    {
+      key: string;
+      kind: string;
+      members: {
+        id: string;
+        fullName: string;
+        bookingRef: string;
+        ticketNumber: string;
+        status: string;
+        checkedIn: boolean;
+        hasVote: boolean;
+      }[];
+    }[]
+  >([]);
 
   async function loadAll(includeRemoved = showRemoved) {
     const attendeesUrl = includeRemoved
@@ -133,6 +150,15 @@ export default function OrganizerPage() {
     setAttendees((await aRes.json()).attendees || []);
     setVoting(await vRes.json());
     setLogs((await lRes.json()).logs || []);
+    try {
+      const dupRes = await fetch("/api/organizer/duplicates");
+      if (dupRes.ok) {
+        const dupJson = await dupRes.json();
+        setDupClusters(dupJson.clusters || []);
+      }
+    } catch {
+      // non-fatal
+    }
   }
 
   useEffect(() => {
@@ -168,22 +194,49 @@ export default function OrganizerPage() {
     setAttendees(data.attendees || []);
   }
 
-  async function attendeeAction(attendeeId: string, action: "approve" | "revoke" | "reissue") {
+  async function attendeeAction(
+    attendeeId: string,
+    action: "approve" | "revoke" | "resend" | "replace_qr",
+  ) {
     setMessage(null);
+    setError(null);
+    let reason: string | undefined;
+    if (action === "replace_qr") {
+      const ok = confirm(
+        "Replace QR code?\n\nThis INVALIDATES the previous QR. The same attendee, ticket number, check-in, and votes are kept — no duplicate person or extra vote is created.\n\nUse Re-send instead if the guest only lost their confirmation.",
+      );
+      if (!ok) return;
+      const entered = prompt("Reason for replacing the QR (required):");
+      if (!entered || entered.trim().length < 3) {
+        setError("QR replace cancelled — reason required.");
+        return;
+      }
+      reason = entered.trim();
+    }
     const res = await fetch("/api/organizer/attendees/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ attendeeId, action }),
+      body: JSON.stringify({ attendeeId, action, reason }),
     });
     const data = await res.json();
     if (!res.ok) {
       setError(data.error || "Action failed.");
       return;
     }
-    if (data.votingCredential) {
-      setMessage(`New voting code for reissue/approve: ${data.votingCredential}`);
+    if (action === "resend") {
+      setMessage(
+        data.link
+          ? `Re-sent existing ticket (same QR). Link: ${data.link}`
+          : data.message || "Existing ticket re-sent.",
+      );
+    } else if (data.votingCredential) {
+      setMessage(
+        `${data.message || "Done."} Voting code: ${data.votingCredential}${
+          data.link ? ` · ${data.link}` : ""
+        }`,
+      );
     } else {
-      setMessage(`Action ${action} complete.`);
+      setMessage(data.message || `Action ${action} complete.`);
     }
     await loadAll();
   }
@@ -524,7 +577,7 @@ export default function OrganizerPage() {
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <input
               className="field"
-              placeholder="Search name, phone, email"
+              placeholder="Search name, booking ref, ticket #, phone, email"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -557,6 +610,8 @@ export default function OrganizerPage() {
                     {a.ticketRef ? ` · ref ${a.ticketRef}` : ""}
                     {a.checkedInAt ? " · checked in" : ""}
                     {a.email ? ` · ${a.email}` : ""}
+                    {a.ticketNumber ? ` · ${a.ticketNumber}` : ""}
+                    {a.bookingRef ? ` · ${a.bookingRef}` : ""}
                   </p>
                   <p className="text-xs text-[var(--ink-soft)]">
                     Manager {a.managerName || "—"}
@@ -615,12 +670,21 @@ export default function OrganizerPage() {
                           Revoke
                         </button>
                       )}
+                      {a.status === "ISSUED" && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary !min-h-10 !px-3 !text-sm"
+                          onClick={() => attendeeAction(a.id, "resend")}
+                        >
+                          Re-send ticket
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-secondary !min-h-10 !px-3 !text-sm"
-                        onClick={() => attendeeAction(a.id, "reissue")}
+                        onClick={() => attendeeAction(a.id, "replace_qr")}
                       >
-                        Reissue
+                        Replace QR
                       </button>
                     </>
                   )}
@@ -628,6 +692,37 @@ export default function OrganizerPage() {
               </div>
             ))}
           </div>
+        </section>
+
+        <section className="panel p-5">
+          <h2 className="brand-mark text-2xl text-[var(--red)]">Possible duplicates</h2>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">
+            Review only — nothing is merged or deleted automatically. Preserve check-in and
+            votes when resolving.
+          </p>
+          {dupClusters.length === 0 ? (
+            <p className="mt-3 text-sm text-[var(--ink-soft)]">No email/phone clusters found.</p>
+          ) : (
+            <ul className="mt-3 space-y-3">
+              {dupClusters.slice(0, 20).map((c) => (
+                <li key={c.key} className="rounded-xl border border-[var(--red)]/10 p-3 text-sm">
+                  <p className="font-semibold text-[var(--red)]">
+                    {c.kind === "email" ? "Shared email" : "Shared phone"} · {c.members.length}{" "}
+                    records
+                  </p>
+                  <ul className="mt-2 space-y-1">
+                    {c.members.map((m) => (
+                      <li key={m.id}>
+                        {m.fullName} · {m.bookingRef} · {m.ticketNumber} · {m.status}
+                        {m.checkedIn ? " · checked in" : ""}
+                        {m.hasVote ? " · voted" : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="panel p-5">
