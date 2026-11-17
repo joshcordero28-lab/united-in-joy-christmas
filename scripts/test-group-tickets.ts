@@ -140,12 +140,27 @@ async function main() {
     });
     assert(okLookup.ok && okJ.mode === "booking", "secure booking lookup");
 
-    const { res: tn, json: tnJ } = await req("/api/booking/lookup", {
+    const { res: tnAlone } = await req("/api/booking/lookup", {
       method: "POST",
       body: JSON.stringify({ ticketNumber: first.ticketNumber }),
     });
-    assert(tn.ok && tnJ.mode === "ticket", "ticket number lookup");
+    assert(tnAlone.status === 401, "ticket number alone blocked");
+
+    const { res: tn, json: tnJ } = await req("/api/booking/lookup", {
+      method: "POST",
+      body: JSON.stringify({
+        ticketNumber: first.ticketNumber,
+        accessToken: json.managerToken,
+      }),
+    });
+    assert(tn.ok && tnJ.mode === "ticket", "ticket number + access lookup");
     assert(!("attendees" in tnJ), "no group PII on ticket lookup");
+
+    const { res: opaque, json: opaqueJ } = await req("/api/booking/lookup", {
+      method: "POST",
+      body: JSON.stringify({ ticket: first.ticketToken }),
+    });
+    assert(opaque.ok && opaqueJ.mode === "ticket", "opaque ticket link lookup");
     pass(`${size}-person booking + check-in + lookup`);
   }
 

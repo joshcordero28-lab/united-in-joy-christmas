@@ -76,7 +76,7 @@ export default function FindTicketsPage() {
     if (mode === "booking") {
       return "Booking reference alone never opens tickets — you also need the private access code from your original booking link.";
     }
-    return "Looking up one ticket number returns only that person’s ticket — not the rest of the group.";
+    return "Paste your private ticket link, or use a ticket number together with your booking access code. A ticket number alone cannot open a ticket.";
   }, [mode]);
 
   async function onSubmit(e: FormEvent) {
@@ -95,7 +95,15 @@ export default function FindTicketsPage() {
         };
       } else {
         const q = ticketQuery.trim();
-        body = /^UIJ2026-\d{5}-\d{2}$/i.test(q) ? { ticketNumber: q } : { ticket: q };
+        if (/^UIJ2026-\d{5}-\d{2}$/i.test(q)) {
+          // Sequential ticket numbers are not secrets — require booking access code.
+          body = {
+            ticketNumber: q,
+            accessToken: accessToken.trim(),
+          };
+        } else {
+          body = { ticket: q };
+        }
       }
 
       const res = await fetch("/api/booking/lookup", {
@@ -157,8 +165,8 @@ export default function FindTicketsPage() {
         <p className="script-mark text-2xl text-[var(--red)]">Retrieve</p>
         <h1 className="brand-mark text-4xl text-[var(--red)]">Find tickets</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Open a whole booking with your reference + access code, or look up one ticket
-          number.
+          Open a whole booking with your reference + access code, or reopen one ticket
+          with its private link.
         </p>
 
         {!hasResult ? (
@@ -224,20 +232,38 @@ export default function FindTicketsPage() {
                 </div>
               </>
             ) : (
-              <div>
-                <label className="label" htmlFor="ticketQuery">
-                  Ticket number or ticket link
-                </label>
-                <textarea
-                  id="ticketQuery"
-                  className="field min-h-24 font-mono text-sm"
-                  placeholder="UIJ2026-00042-01 or paste ticket link"
-                  value={ticketQuery}
-                  onChange={(e) => setTicketQuery(e.target.value)}
-                  required
-                  autoComplete="off"
-                />
-              </div>
+              <>
+                <div>
+                  <label className="label" htmlFor="ticketQuery">
+                    Private ticket link (or ticket number)
+                  </label>
+                  <textarea
+                    id="ticketQuery"
+                    className="field min-h-24 font-mono text-sm"
+                    placeholder="Paste ticket link, or enter UIJ2026-00042-01"
+                    value={ticketQuery}
+                    onChange={(e) => setTicketQuery(e.target.value)}
+                    required
+                    autoComplete="off"
+                  />
+                </div>
+                {/^UIJ2026-\d{5}-\d{2}$/i.test(ticketQuery.trim()) && (
+                  <div>
+                    <label className="label" htmlFor="ticketAccessToken">
+                      Booking access code (required with ticket number)
+                    </label>
+                    <textarea
+                      id="ticketAccessToken"
+                      className="field min-h-24 font-mono text-sm"
+                      placeholder="Paste the code or full /manage#… link"
+                      value={accessToken}
+                      onChange={(e) => setAccessToken(e.target.value)}
+                      required
+                      autoComplete="off"
+                    />
+                  </div>
+                )}
+              </>
             )}
 
             {error && <p className="font-semibold text-[var(--red)]">{error}</p>}

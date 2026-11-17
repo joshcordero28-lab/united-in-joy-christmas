@@ -847,14 +847,33 @@ async function main() {
       assert(fullJ.totalAttendees === size, "Lookup returns full group");
 
       const first = (g.attendees as { ticketNumber: string; ticketToken: string; fullName: string })[0];
-      const { res: oneRes, json: oneJ } = await req("/api/booking/lookup", {
+      // Ticket number alone must NOT unlock QR / bearer secrets (guessable IDs).
+      const { res: tnAlone, json: tnAloneJ } = await req("/api/booking/lookup", {
         method: "POST",
         body: JSON.stringify({ ticketNumber: first.ticketNumber }),
       });
-      assert(oneRes.ok && oneJ.mode === "ticket", "Ticket-number lookup");
+      assert(tnAlone.status === 401, "Ticket number alone must be rejected");
+      assert(!("qr" in tnAloneJ) && !("link" in tnAloneJ) && !("votingCredential" in tnAloneJ),
+        "Ticket-number-only response must not expose ticket secrets");
+
+      const { res: oneRes, json: oneJ } = await req("/api/booking/lookup", {
+        method: "POST",
+        body: JSON.stringify({
+          ticketNumber: first.ticketNumber,
+          accessToken: g.managerToken,
+        }),
+      });
+      assert(oneRes.ok && oneJ.mode === "ticket", "Ticket-number + access lookup");
       assert(oneJ.fullName === first.fullName, "Ticket lookup returns that attendee");
       assert(!("attendees" in oneJ), "Ticket lookup must not include group attendees");
       assert(!("managerToken" in oneJ) && !("manageLink" in oneJ), "Ticket lookup hides manage credentials");
+
+      const { res: opaqueRes, json: opaqueJ } = await req("/api/booking/lookup", {
+        method: "POST",
+        body: JSON.stringify({ ticket: first.ticketToken }),
+      });
+      assert(opaqueRes.ok && opaqueJ.mode === "ticket", "Opaque ticket token lookup still works");
+      assert(opaqueJ.fullName === first.fullName, "Opaque lookup returns that attendee");
 
       // Check-in still per QR; no cross-check-in
       const staffJarLocal = staffJar;
