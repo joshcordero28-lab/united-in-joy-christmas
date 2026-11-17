@@ -226,7 +226,7 @@ export function TicketVerifyPanel({
           <p className="text-sm font-semibold text-[var(--red)]">{error}</p>
           {findUrl && (
             <Link href={findUrl} className="btn btn-secondary !min-h-10 w-full !text-sm">
-              Find My Tickets
+              Find My Ticket
             </Link>
           )}
           {registerUrl && (

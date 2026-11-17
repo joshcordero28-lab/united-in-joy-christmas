@@ -48,7 +48,7 @@ export async function verifyAttendeeTicket(
       status: 401,
       code: "needs_access",
       error:
-        "A booking reference alone cannot verify a ticket. Open Find My Tickets with your booking reference and private access code, then use an individual ticket link.",
+        "A booking reference alone cannot verify a ticket. Use Find My Ticket with your Private Guest Code.",
       registerUrl: "/register",
       findUrl: "/find",
     };
@@ -64,7 +64,7 @@ export async function verifyAttendeeTicket(
         status: 401,
         code: "use_ticket_number_with_code",
         error:
-          "Ticket numbers need your voting code (or recover the ticket link via Find My Tickets).",
+          "Ticket numbers need your voting code — or use Find My Ticket with your Private Guest Code.",
         registerUrl: "/register",
         findUrl: "/find",
       };

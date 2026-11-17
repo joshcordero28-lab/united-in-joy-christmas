@@ -238,11 +238,11 @@ export function ManageClient() {
         <ClientSiteHeader />
       </div>
       <div className="mx-auto w-full max-w-2xl flex-1 px-4 py-8">
-        <p className="script-mark text-2xl text-[var(--red)] print:hidden">Your registration</p>
-        <h1 className="brand-mark text-4xl text-[var(--red)] print:hidden">Group tickets</h1>
+        <p className="script-mark text-2xl text-[var(--red)] print:hidden">My Tickets</p>
+        <h1 className="brand-mark text-4xl text-[var(--red)] print:hidden">Group QR tickets</h1>
         <p className="mt-2 text-[var(--ink-soft)] print:hidden">
-          Private booking page. Each attendee has a separate entry QR — scanning one never
-          checks in the whole group.
+          Every attendee has a separate entry QR — scanning one never checks in the whole
+          group. Group voting (when open) uses these entitlements without creating extras.
         </p>
 
         {!state && (
@@ -265,7 +265,7 @@ export function ManageClient() {
               {loading ? "Opening…" : "View My QR Tickets"}
             </button>
             <p className="text-center text-sm text-[var(--ink-soft)]">
-              Looking up a single ticket?{" "}
+              Only have one ticket?{" "}
               <Link href="/find" className="font-semibold text-[var(--red)] underline">
                 Find My Ticket
               </Link>

@@ -210,7 +210,7 @@ export default function RegisterPage() {
           Get entry tickets with QR codes for the door. One person can register just
           themselves, or several people in one submission. Already registered?{" "}
           <ManageMyTicketsLink className="font-semibold text-[var(--red)] underline">
-            Find My Tickets
+            Find My Ticket
           </ManageMyTicketsLink>
           .
         </p>
@@ -460,7 +460,7 @@ export default function RegisterPage() {
               )}
               {result.managerToken && result.attendees.length > 1 && (
                 <ManageMyTicketsLink className="btn btn-secondary w-full" hrefOverride="/manage">
-                  View All My Tickets
+                  My Tickets
                 </ManageMyTicketsLink>
               )}
               <button
