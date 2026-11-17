@@ -30,10 +30,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid ticket." }, { status: 400 });
     }
 
-    const attendee = await prisma.attendee.findUnique({ where: { ticketToken: token } });
+    const attendee = await prisma.attendee.findUnique({
+      where: { ticketToken: token },
+      select: {
+        fullName: true,
+        status: true,
+        ticketNumber: true,
+        ticketToken: true,
+        votingCredentialPlain: true,
+        checkedInAt: true,
+        registrationPartyId: true,
+        registrationParty: {
+          select: { bookingRef: true },
+        },
+      },
+    });
     if (!attendee) {
       return NextResponse.json({ error: "Ticket not found." }, { status: 404 });
     }
+
+    const partySize = await prisma.attendee.count({
+      where: {
+        registrationPartyId: attendee.registrationPartyId,
+        status: { not: "REMOVED" },
+      },
+    });
 
     const event = await getEventConfig();
     const baseUrl = process.env.APP_BASE_URL || "http://127.0.0.1:3000";
@@ -47,6 +68,9 @@ export async function POST(request: Request) {
     return NextResponse.json({
       fullName: attendee.fullName,
       status: attendee.status,
+      ticketNumber: attendee.ticketNumber,
+      bookingRef: attendee.registrationParty.bookingRef,
+      partySize,
       dateLabel: event.dateLabel,
       venueLabel: event.venueLabel,
       checkedInAt: attendee.checkedInAt?.toISOString() || null,

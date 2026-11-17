@@ -1,10 +1,10 @@
-import Link from "next/link";
 import Image from "next/image";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { Sparkles } from "@/components/Sparkles";
 import { ScriptWatermark } from "@/components/ScriptWatermark";
 import { OrnamentRow } from "@/components/OrnamentRow";
+import { HomeHeroCtas } from "@/components/HomeHeroCtas";
 import { getEventConfig } from "@/lib/event";
 
 export const dynamic = "force-dynamic";
@@ -40,14 +40,7 @@ export default async function HomePage() {
             A gathering of thanksgiving and celebration — get your QR ticket and join
             the Christmas Group Talent Show.
           </p>
-          <div className="animate-rise-delay mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link href="/register" className="btn btn-primary cta-pulse">
-              Register for a ticket
-            </Link>
-            <Link href="/ticket" className="btn btn-secondary">
-              Open my ticket
-            </Link>
-          </div>
+          <HomeHeroCtas />
           <p className="mt-8 text-sm text-[var(--cream)]/70">
             {event.dateLabel} · {event.venueLabel}
           </p>

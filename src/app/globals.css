@@ -370,3 +370,29 @@ a {
 .text-success-festive {
   color: var(--green);
 }
+
+@media print {
+  body {
+    background: white !important;
+    background-image: none !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .ticket-print-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 1.5rem;
+  }
+
+  .ticket-shell {
+    box-shadow: none;
+    border: 2px solid #c49212;
+  }
+
+  .page-shell {
+    min-height: 0;
+  }
+}
