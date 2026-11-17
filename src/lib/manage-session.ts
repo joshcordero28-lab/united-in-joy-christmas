@@ -15,8 +15,8 @@ export function hasStoredManagerToken(): boolean {
 
 /**
  * Path for “Manage My Tickets”:
- * - authorized session → `/manage` (token stays in localStorage; not in the URL)
- * - otherwise → `/find` for booking-ref + access verification
+ * - authorized session → `/manage` (private guest code stays in localStorage; not in the URL)
+ * - otherwise → `/find` for private guest code lookup
  */
 export function manageMyTicketsPath(): "/manage" | "/find" {
   return hasStoredManagerToken() ? "/manage" : "/find";

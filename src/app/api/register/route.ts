@@ -301,8 +301,8 @@ export async function POST(request: Request) {
         status === TicketStatus.PENDING
           ? `Registration received for ${count} attendee${count === 1 ? "" : "s"}. Booking reference ${bookingRef}. Tickets will be issued after approval.`
           : count > 1
-            ? `Registered ${count} attendees successfully. Booking reference ${bookingRef}. You can retrieve your tickets anytime using your booking reference — you do not need to register again.`
-            : `Registration complete. Booking reference ${bookingRef}. You can retrieve your tickets anytime using your booking reference — you do not need to register again.`,
+            ? `Registered ${count} attendees successfully. Save your Private Guest Code to reopen every QR ticket — you do not need to register again.`
+            : `Registration complete. Save your Private Guest Code or ticket link to reopen your QR — you do not need to register again.`,
     };
 
     if (idempotencyKey) {

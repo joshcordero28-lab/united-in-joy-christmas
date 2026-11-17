@@ -131,36 +131,35 @@ async function main() {
     });
     assert(alone.status === 401, "ref alone blocked");
 
-    const { res: okLookup, json: okJ } = await req("/api/booking/lookup", {
+    // Primary UX: private guest code alone opens the authorized group
+    const { res: codeAlone, json: codeJ } = await req("/api/booking/lookup", {
       method: "POST",
-      body: JSON.stringify({
-        bookingRef: json.bookingRef,
-        accessToken: json.managerToken,
-      }),
+      body: JSON.stringify({ guestCode: json.managerToken }),
     });
-    assert(okLookup.ok && okJ.mode === "booking", "secure booking lookup");
+    assert(codeAlone.ok && codeJ.mode === "booking", "private guest code alone opens group");
+    assert(
+      Array.isArray(codeJ.attendees) && (codeJ.attendees as unknown[]).length === size,
+      "group size from guest code",
+    );
+    assert(
+      (codeJ.attendees as { qr: string | null }[]).every((a) => a.qr),
+      "each group ticket includes QR",
+    );
 
     const { res: tnAlone } = await req("/api/booking/lookup", {
       method: "POST",
-      body: JSON.stringify({ ticketNumber: first.ticketNumber }),
+      body: JSON.stringify({ guestCode: first.ticketNumber }),
     });
     assert(tnAlone.status === 401, "ticket number alone blocked");
 
-    const { res: tn, json: tnJ } = await req("/api/booking/lookup", {
-      method: "POST",
-      body: JSON.stringify({
-        ticketNumber: first.ticketNumber,
-        accessToken: json.managerToken,
-      }),
-    });
-    assert(tn.ok && tnJ.mode === "ticket", "ticket number + access lookup");
-    assert(!("attendees" in tnJ), "no group PII on ticket lookup");
-
+    // Individual ticket token → that attendee only (no group mates)
     const { res: opaque, json: opaqueJ } = await req("/api/booking/lookup", {
       method: "POST",
-      body: JSON.stringify({ ticket: first.ticketToken }),
+      body: JSON.stringify({ guestCode: first.ticketToken }),
     });
-    assert(opaque.ok && opaqueJ.mode === "ticket", "opaque ticket link lookup");
+    assert(opaque.ok && opaqueJ.mode === "ticket", "individual guest ticket code");
+    assert(!("attendees" in opaqueJ), "no group PII on individual ticket lookup");
+    assert(opaqueJ.qr, "individual lookup returns QR");
     pass(`${size}-person booking + check-in + lookup`);
   }
 

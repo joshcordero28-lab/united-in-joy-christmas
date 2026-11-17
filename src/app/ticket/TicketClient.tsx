@@ -6,9 +6,10 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
 import { CcfMark } from "@/components/CcfMark";
 import { ManageMyTicketsLink } from "@/components/ManageMyTicketsLink";
-import { isBookingRefInput, isTicketNumberInput, normalizeTicketNumber } from "@/lib/booking-ref";
+import { isBookingRefInput, isTicketNumberInput } from "@/lib/booking-ref";
 import { extractTicketToken } from "@/lib/tickets";
 import Link from "next/link";
+import { SaveQrButton } from "@/components/SaveQrButton";
 
 type TicketView = {
   fullName: string;
@@ -50,11 +51,8 @@ export function TicketClient() {
     if (isTicketNumberInput(trimmed) || isBookingRefInput(trimmed)) {
       setView(null);
       setLoading(false);
-      const tn = normalizeTicketNumber(trimmed);
       setError(
-        tn
-          ? `Ticket numbers open via Find My Tickets (number + booking access code). Your number: ${tn}`
-          : "Booking references open via Find My Tickets with your private access code — not here.",
+        "That looks like a public reference number. Use Find My Ticket with your Private Guest Code instead.",
       );
       return;
     }
@@ -182,6 +180,13 @@ export function TicketClient() {
                       className="h-64 w-64 sm:h-72 sm:w-72"
                     />
                   </div>
+                  <div className="mx-auto mt-3 max-w-xs space-y-2">
+                    <SaveQrButton
+                      qrDataUrl={view.qr}
+                      fileName={`united-in-joy-${view.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`}
+                      className="btn btn-secondary !min-h-10 w-full !text-sm"
+                    />
+                  </div>
                   <p className="mt-3 text-sm text-[var(--ink-soft)]">
                     Save this page or share the ticket link — staff will scan the code.
                   </p>
@@ -240,13 +245,13 @@ export function TicketClient() {
           <>
             <h1 className="brand-mark text-4xl text-[var(--red)]">Open my ticket</h1>
             <p className="mt-2 text-[var(--ink-soft)]">
-              Paste your private ticket link to reopen the QR. If you only have a booking
-              or ticket reference number, use Find My Tickets instead.
+              Paste your private ticket link to reopen the QR immediately. Or use Find My
+              Ticket with your Private Guest Code.
             </p>
             <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
               <div>
                 <label className="label" htmlFor="ticketLink">
-                  Ticket link
+                  Private ticket link
                 </label>
                 <textarea
                   className="field min-h-28 text-sm"
@@ -261,18 +266,18 @@ export function TicketClient() {
                 <div className="space-y-2">
                   <p className="font-semibold text-[var(--red)]">{error}</p>
                   <Link href="/find" className="btn btn-secondary w-full">
-                    Find My Tickets with reference number
+                    Find My Ticket
                   </Link>
                 </div>
               )}
               <button className="btn btn-primary w-full" type="submit">
-                Show my QR ticket
+                View QR Code
               </button>
               <p className="text-center text-sm text-[var(--ink-soft)]">
-                Have a booking or ticket number?{" "}
-                <ManageMyTicketsLink className="font-semibold text-[var(--red)] underline">
-                  Find My Tickets
-                </ManageMyTicketsLink>
+                Have a Private Guest Code?{" "}
+                <Link href="/find" className="font-semibold text-[var(--red)] underline">
+                  Find My Ticket
+                </Link>
               </p>
             </form>
           </>

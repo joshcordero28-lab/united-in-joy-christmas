@@ -416,41 +416,52 @@ export default function RegisterPage() {
             <h2 className="brand-mark text-3xl text-[var(--red)]">Registration Successful!</h2>
             <p className="text-[var(--ink-soft)]">{result.message}</p>
 
-            {result.bookingRef && (
+            {result.managerToken && (
               <div className="rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-4">
                 <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[var(--red)]">
-                  Your booking reference
+                  Your Private Guest Code
                 </p>
-                <p className="mt-1 font-mono text-2xl font-extrabold tracking-wide">
-                  {result.bookingRef}
+                <p className="mt-2 break-all font-mono text-sm font-semibold leading-relaxed">
+                  {result.managerToken}
                 </p>
                 <p className="mt-2 text-sm text-[var(--ink-soft)]">
-                  You can retrieve your tickets anytime using your booking reference. You do not
-                  need to register again.
+                  Save this code. Use Find My Ticket anytime to reopen your QR
+                  {result.attendees.length > 1 ? " tickets" : " ticket"} — you do not need to
+                  register again.
                 </p>
                 {(result.attendeeCount || result.attendees?.length || 0) > 1 && (
                   <p className="mt-2 text-sm font-semibold text-[var(--green)]">
-                    {result.attendeeCount || result.attendees.length} attendees included in this
-                    booking.
+                    {result.attendeeCount || result.attendees.length} attendees included — this
+                    code opens the whole group.
                   </p>
                 )}
+                <button
+                  type="button"
+                  className="btn btn-secondary mt-3 w-full"
+                  onClick={() => copyText("code", result.managerToken!)}
+                >
+                  {copied === "code" ? "Copied!" : "Copy Private Guest Code"}
+                </button>
               </div>
             )}
 
             <div className="flex flex-col gap-2">
-              {result.managerToken && (
-                <ManageMyTicketsLink className="btn btn-primary w-full" hrefOverride="/manage">
+              {result.attendees?.[0]?.ticketToken && (
+                <Link
+                  className="btn btn-primary w-full"
+                  href={
+                    result.attendees[0].votingCredential
+                      ? `/ticket#${encodeURIComponent(result.attendees[0].ticketToken!)}~${encodeURIComponent(result.attendees[0].votingCredential!)}`
+                      : `/ticket#${encodeURIComponent(result.attendees[0].ticketToken!)}`
+                  }
+                >
+                  View QR Code
+                </Link>
+              )}
+              {result.managerToken && result.attendees.length > 1 && (
+                <ManageMyTicketsLink className="btn btn-secondary w-full" hrefOverride="/manage">
                   View All My Tickets
                 </ManageMyTicketsLink>
-              )}
-              {result.bookingRef && (
-                <button
-                  type="button"
-                  className="btn btn-secondary w-full"
-                  onClick={() => copyText("ref", result.bookingRef!)}
-                >
-                  {copied === "ref" ? "Copied!" : "Copy Booking Reference"}
-                </button>
               )}
               <button
                 type="button"
@@ -466,14 +477,12 @@ export default function RegisterPage() {
                   onClick={() => {
                     const lines = [
                       `United in Joy Christmas 2026`,
-                      `Booking: ${result.bookingRef || ""}`,
+                      `Private Guest Code: ${result.managerToken}`,
                       `Manager: ${result.managerName}`,
                       `Attendees: ${result.attendees?.length || 0}`,
-                      ...(result.attendees || []).map(
-                        (a) => `- ${a.fullName}${a.ticketNumber ? ` (${a.ticketNumber})` : ""}`,
-                      ),
+                      ...(result.attendees || []).map((a) => `- ${a.fullName}`),
                       "",
-                      "Retrieve tickets with your booking reference + private booking link. Do not register again.",
+                      "Retrieve tickets with Find My Ticket using your Private Guest Code. Do not register again.",
                     ];
                     void copyText("details", lines.join("\n"));
                   }}
@@ -495,20 +504,15 @@ export default function RegisterPage() {
                       className="rounded-xl border border-[var(--red)]/10 bg-white/70 p-3 text-sm"
                     >
                       <p className="font-semibold">{a.fullName}</p>
-                      {a.ticketNumber && (
-                        <p className="mt-0.5 font-mono text-xs font-semibold text-[var(--red)]">
-                          {a.ticketNumber}
-                        </p>
-                      )}
                       <Link
-                        className="mt-2 inline-flex font-extrabold text-[var(--red)] underline"
+                        className="btn btn-primary mt-3 !min-h-10 w-full !text-sm"
                         href={
                           a.votingCredential
                             ? `/ticket#${encodeURIComponent(a.ticketToken!)}~${encodeURIComponent(a.votingCredential)}`
                             : `/ticket#${encodeURIComponent(a.ticketToken!)}`
                         }
                       >
-                        Open ticket
+                        View QR Code
                       </Link>
                     </div>
                   ) : (

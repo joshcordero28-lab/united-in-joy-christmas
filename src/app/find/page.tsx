@@ -1,15 +1,14 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { ClientSiteHeader } from "@/components/ClientSiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { CcfMark } from "@/components/CcfMark";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
 import { ManageMyTicketsLink } from "@/components/ManageMyTicketsLink";
+import { SaveQrButton } from "@/components/SaveQrButton";
 import { storeManagerToken } from "@/lib/manage-session";
-
-type LookupMode = "booking" | "ticket";
 
 type TicketResult = {
   mode: "ticket";
@@ -60,24 +59,30 @@ function managerHashFromLink(manageLink: string): string {
   }
 }
 
+function ticketPageHref(link: string | null, votingCredential?: string | null, ticketToken?: string | null) {
+  if (ticketToken) {
+    return votingCredential
+      ? `/ticket#${encodeURIComponent(ticketToken)}~${encodeURIComponent(votingCredential)}`
+      : `/ticket#${encodeURIComponent(ticketToken)}`;
+  }
+  if (!link) return "/ticket";
+  try {
+    const u = new URL(link, typeof window !== "undefined" ? window.location.origin : "http://local");
+    return `${u.pathname}${u.hash}`;
+  } catch {
+    return "/ticket";
+  }
+}
+
 export default function FindTicketsPage() {
-  const [mode, setMode] = useState<LookupMode>("booking");
-  const [bookingRef, setBookingRef] = useState("");
-  const [accessToken, setAccessToken] = useState("");
-  const [ticketQuery, setTicketQuery] = useState("");
+  const [guestCode, setGuestCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ticket, setTicket] = useState<TicketResult | null>(null);
   const [booking, setBooking] = useState<BookingResult | null>(null);
+  const [focusQrId, setFocusQrId] = useState<string | null>(null);
 
   const hasResult = Boolean(ticket || booking);
-
-  const hint = useMemo(() => {
-    if (mode === "booking") {
-      return "Booking reference alone never opens tickets — you also need the private access code from your original booking link.";
-    }
-    return "Paste your private ticket link, or use a ticket number together with your booking access code. A ticket number alone cannot open a ticket.";
-  }, [mode]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -85,35 +90,17 @@ export default function FindTicketsPage() {
     setError(null);
     setTicket(null);
     setBooking(null);
+    setFocusQrId(null);
 
     try {
-      let body: Record<string, string>;
-      if (mode === "booking") {
-        body = {
-          bookingRef: bookingRef.trim(),
-          accessToken: accessToken.trim(),
-        };
-      } else {
-        const q = ticketQuery.trim();
-        if (/^UIJ2026-\d{5}-\d{2}$/i.test(q)) {
-          // Sequential ticket numbers are not secrets — require booking access code.
-          body = {
-            ticketNumber: q,
-            accessToken: accessToken.trim(),
-          };
-        } else {
-          body = { ticket: q };
-        }
-      }
-
       const res = await fetch("/api/booking/lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ guestCode: guestCode.trim() }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Lookup failed.");
+        setError(data.error || "Could not verify that private guest code.");
         return;
       }
 
@@ -127,6 +114,9 @@ export default function FindTicketsPage() {
           } catch {
             storeManagerToken(hash);
           }
+        }
+        if (result.attendees.length === 1 && result.attendees[0]?.qr) {
+          setFocusQrId(result.attendees[0].id);
         }
       } else {
         const result = data as TicketResult;
@@ -156,120 +146,50 @@ export default function FindTicketsPage() {
     setTicket(null);
     setBooking(null);
     setError(null);
+    setFocusQrId(null);
   }
 
   return (
     <div className="page-shell">
       <ClientSiteHeader />
       <div className="mx-auto w-full max-w-lg flex-1 px-4 py-8">
-        <p className="script-mark text-2xl text-[var(--red)]">Retrieve</p>
-        <h1 className="brand-mark text-4xl text-[var(--red)]">Find tickets</h1>
+        <p className="script-mark text-2xl text-[var(--red)]">Already registered?</p>
+        <h1 className="brand-mark text-4xl text-[var(--red)]">Find My Ticket</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Open a whole booking with your reference + access code, or reopen one ticket
-          with its private link.
+          Enter the private guest code from registration. One code is enough — no booking
+          reference needed.
         </p>
 
         {!hasResult ? (
           <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                className={`rounded-xl border px-3 py-3 text-left text-sm font-semibold ${
-                  mode === "booking"
-                    ? "border-[var(--red)] bg-[var(--cream-deep)] text-[var(--red)]"
-                    : "border-[var(--red)]/15 bg-white/70"
-                }`}
-                onClick={() => setMode("booking")}
-                aria-pressed={mode === "booking"}
-              >
-                Whole booking
-              </button>
-              <button
-                type="button"
-                className={`rounded-xl border px-3 py-3 text-left text-sm font-semibold ${
-                  mode === "ticket"
-                    ? "border-[var(--red)] bg-[var(--cream-deep)] text-[var(--red)]"
-                    : "border-[var(--red)]/15 bg-white/70"
-                }`}
-                onClick={() => setMode("ticket")}
-                aria-pressed={mode === "ticket"}
-              >
-                One ticket
-              </button>
+            <div>
+              <label className="label" htmlFor="guestCode">
+                Private Guest Code
+              </label>
+              <textarea
+                id="guestCode"
+                className="field min-h-28 font-mono text-sm"
+                placeholder="Paste your private guest code, ticket link, or booking link"
+                value={guestCode}
+                onChange={(e) => setGuestCode(e.target.value)}
+                required
+                autoComplete="off"
+                autoFocus
+              />
+              <p className="mt-2 text-xs text-[var(--ink-soft)]">
+                Use the code or link you received when you registered. Public reference
+                numbers alone will not open a ticket.
+              </p>
             </div>
-
-            <p className="text-xs text-[var(--ink-soft)]">{hint}</p>
-
-            {mode === "booking" ? (
-              <>
-                <div>
-                  <label className="label" htmlFor="bookingRef">
-                    Booking reference
-                  </label>
-                  <input
-                    id="bookingRef"
-                    className="field font-mono"
-                    placeholder="UIJ2026-00042"
-                    value={bookingRef}
-                    onChange={(e) => setBookingRef(e.target.value)}
-                    required
-                    autoComplete="off"
-                  />
-                </div>
-                <div>
-                  <label className="label" htmlFor="accessToken">
-                    Private access code (from booking link)
-                  </label>
-                  <textarea
-                    id="accessToken"
-                    className="field min-h-24 font-mono text-sm"
-                    placeholder="Paste the code or full /manage#… link"
-                    value={accessToken}
-                    onChange={(e) => setAccessToken(e.target.value)}
-                    required
-                    autoComplete="off"
-                  />
-                </div>
-              </>
-            ) : (
-              <>
-                <div>
-                  <label className="label" htmlFor="ticketQuery">
-                    Private ticket link (or ticket number)
-                  </label>
-                  <textarea
-                    id="ticketQuery"
-                    className="field min-h-24 font-mono text-sm"
-                    placeholder="Paste ticket link, or enter UIJ2026-00042-01"
-                    value={ticketQuery}
-                    onChange={(e) => setTicketQuery(e.target.value)}
-                    required
-                    autoComplete="off"
-                  />
-                </div>
-                {/^UIJ2026-\d{5}-\d{2}$/i.test(ticketQuery.trim()) && (
-                  <div>
-                    <label className="label" htmlFor="ticketAccessToken">
-                      Booking access code (required with ticket number)
-                    </label>
-                    <textarea
-                      id="ticketAccessToken"
-                      className="field min-h-24 font-mono text-sm"
-                      placeholder="Paste the code or full /manage#… link"
-                      value={accessToken}
-                      onChange={(e) => setAccessToken(e.target.value)}
-                      required
-                      autoComplete="off"
-                    />
-                  </div>
-                )}
-              </>
-            )}
 
             {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" type="submit" disabled={loading}>
-              {loading ? "Looking up…" : "Find tickets"}
+              {loading ? "Verifying…" : "View My QR Ticket"}
             </button>
+            <p className="text-center text-sm text-[var(--ink-soft)]">
+              Lost your code and ticket link? Ask an event organizer for help — they can
+              re-send your existing ticket without creating a duplicate.
+            </p>
           </form>
         ) : ticket ? (
           <div className="mt-8 space-y-4">
@@ -286,15 +206,16 @@ export default function FindTicketsPage() {
                 {ticket.dateLabel} · {ticket.venueLabel}
               </p>
               <p className="mt-5 text-xl font-extrabold">{ticket.fullName}</p>
-              <p className="mt-1 font-mono text-sm font-semibold text-[var(--red)]">
-                {ticket.ticketNumber}
-              </p>
-              <p className="text-xs text-[var(--ink-soft)]">Booking {ticket.bookingRef}</p>
               {ticket.qr ? (
-                <div className="mx-auto mt-4 inline-block rounded-2xl border-2 border-[var(--gold)] bg-white p-4">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={ticket.qr} alt="Entry ticket QR" className="h-64 w-64" />
-                </div>
+                <>
+                  <p className="mt-4 text-base font-extrabold text-[var(--red)]">
+                    Show this QR at the door
+                  </p>
+                  <div className="mx-auto mt-3 inline-block rounded-2xl border-2 border-[var(--gold)] bg-white p-4">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={ticket.qr} alt="Entry ticket QR" className="h-64 w-64" />
+                  </div>
+                </>
               ) : (
                 <p className="mt-4 text-[var(--ink-soft)]">Ticket not valid for entry.</p>
               )}
@@ -304,23 +225,23 @@ export default function FindTicketsPage() {
                 </p>
               )}
             </div>
-            {ticket.link && (
-              <div className="space-y-2">
-                <CopyLinkButton link={ticket.link} />
+            <div className="space-y-2">
+              {ticket.qr && (
+                <SaveQrButton
+                  qrDataUrl={ticket.qr}
+                  fileName={`united-in-joy-${ticket.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`}
+                />
+              )}
+              {ticket.link && <CopyLinkButton link={ticket.link} />}
+              {ticket.link && (
                 <Link
                   className="btn btn-secondary w-full"
-                  href={
-                    ticket.votingCredential && ticket.link.includes("#")
-                      ? `/ticket#${ticket.link.split("#")[1]}`
-                      : ticket.link.includes("#")
-                        ? `/ticket#${ticket.link.split("#")[1]}`
-                        : "/ticket"
-                  }
+                  href={ticketPageHref(ticket.link, ticket.votingCredential)}
                 >
-                  Open ticket page
+                  View QR Code
                 </Link>
-              </div>
-            )}
+              )}
+            </div>
             <button type="button" className="btn btn-secondary w-full" onClick={reset}>
               Look up another
             </button>
@@ -329,9 +250,8 @@ export default function FindTicketsPage() {
           <div className="mt-8 space-y-4">
             <div className="panel animate-rise space-y-3 p-5">
               <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[var(--red)]">
-                Booking found
+                Your group tickets
               </p>
-              <p className="font-mono text-2xl font-extrabold">{booking.bookingRef}</p>
               <p className="font-semibold text-[var(--green)]">Managed by {booking.managerName}</p>
               <p className="text-sm text-[var(--ink-soft)]">
                 {booking.totalAttendees} ticket{booking.totalAttendees === 1 ? "" : "s"} ·{" "}
@@ -341,25 +261,62 @@ export default function FindTicketsPage() {
                 className="btn btn-primary w-full"
                 hrefOverride="/manage"
                 label="Manage My Tickets"
-              />
-              <p className="text-xs text-[var(--ink-soft)]">
-                Access stays on this device — the booking code is not added to the page URL.
-              </p>
+              >
+                Manage My Tickets
+              </ManageMyTicketsLink>
             </div>
-            <ul className="space-y-2">
-              {booking.attendees.map((a) => (
-                <li
-                  key={a.id}
-                  className="rounded-xl border border-[var(--red)]/10 bg-white/70 px-4 py-3 text-sm"
-                >
-                  <p className="font-semibold">{a.fullName}</p>
-                  <p className="font-mono text-xs text-[var(--red)]">{a.ticketNumber}</p>
-                  <p className="text-xs text-[var(--ink-soft)]">
-                    {a.status}
-                    {a.checkedIn ? " · checked in" : ""}
-                  </p>
-                </li>
-              ))}
+            <ul className="space-y-4">
+              {booking.attendees.map((a) => {
+                const showQr = focusQrId === a.id || booking.attendees.length === 1;
+                return (
+                  <li
+                    key={a.id}
+                    className="rounded-xl border border-[var(--red)]/10 bg-white/70 px-4 py-4 text-sm"
+                  >
+                    <p className="font-semibold text-base">{a.fullName}</p>
+                    <p className="text-xs text-[var(--ink-soft)]">
+                      {a.status}
+                      {a.checkedIn ? " · checked in" : ""}
+                    </p>
+                    {showQr && a.qr ? (
+                      <div className="mt-3 text-center">
+                        <div className="mx-auto inline-block rounded-2xl border-2 border-[var(--gold)] bg-white p-3">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={a.qr}
+                            alt={`Entry QR for ${a.fullName}`}
+                            className="h-48 w-48"
+                          />
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          <SaveQrButton
+                            qrDataUrl={a.qr}
+                            className="btn btn-secondary !min-h-10 w-full !text-sm"
+                            fileName={`united-in-joy-${a.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`}
+                          />
+                          {a.link && (
+                            <Link
+                              className="btn btn-primary !min-h-10 w-full !text-sm"
+                              href={ticketPageHref(a.link, a.votingCredential, a.ticketToken)}
+                            >
+                              View QR Code
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-primary mt-3 !min-h-10 w-full !text-sm"
+                        onClick={() => setFocusQrId(a.id)}
+                        disabled={!a.qr && a.status !== "ISSUED"}
+                      >
+                        {a.qr || a.status === "ISSUED" ? "View QR Code" : "QR not available"}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
             <button type="button" className="btn btn-secondary w-full" onClick={reset}>
               Look up another

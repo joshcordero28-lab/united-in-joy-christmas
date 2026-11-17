@@ -141,21 +141,20 @@ async function main() {
   assert(second.ticketToken === first.ticketToken, "Same ticket token replayed");
   pass("Repeated clicks with same idempotency key do not create duplicates");
 
-  // 5–6. Recovery without original URL
+  // 5–6. Recovery with private guest code alone (no booking ref)
   const { res: lookup, json: lookJ } = await req("/api/booking/lookup", {
     method: "POST",
-    body: JSON.stringify({
-      bookingRef: bookingRef1,
-      accessToken: a.managerToken,
-    }),
+    body: JSON.stringify({ guestCode: a.managerToken }),
   });
-  assert(lookup.ok && lookJ.mode === "booking", "Recover booking via ref + access");
+  assert(lookup.ok && lookJ.mode === "booking", "Recover via private guest code alone");
   assert(lookJ.totalAttendees === 1, "Group dashboard for solo party");
+  assert((lookJ.attendees as { qr: string | null }[])[0]?.qr, "QR returned immediately");
   const { res: byTicket, json: tJ } = await req("/api/booking/lookup", {
     method: "POST",
-    body: JSON.stringify({ ticket: token1 }),
+    body: JSON.stringify({ guestCode: token1 }),
   });
-  assert(byTicket.ok && tJ.mode === "ticket", "Recover via opaque ticket");
+  assert(byTicket.ok && tJ.mode === "ticket", "Recover via individual ticket code");
+  assert(tJ.qr, "Individual ticket QR returned");
   pass("Recover ticket without original registration URL");
   pass("Retrieve tickets for authorized booking");
 
