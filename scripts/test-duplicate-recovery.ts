@@ -281,6 +281,46 @@ async function main() {
     body: JSON.stringify({ visibility: "HIDDEN", state: "CLOSED" }),
   });
 
+  // Alternate verification: staff check-in by printed ticket number
+  await clearLimits();
+  const { res: rNum, json: numGuest } = await req("/api/register", {
+    method: "POST",
+    body: JSON.stringify({
+      fullName: `Ref Check ${stamp}`,
+      email: `refcheck.${stamp}@example.com`,
+      phone: `558${String(stamp).slice(-7)}`,
+      confirmNewPerson: true,
+      idempotencyKey: `refcheck-${stamp}`,
+    }),
+  });
+  assert(rNum.ok, `Ref-check register: ${JSON.stringify(numGuest)}`);
+  const tn = String(numGuest.ticketNumber);
+  const { res: byNum, json: byNumJ } = await req("/api/checkin", {
+    method: "POST",
+    jar: staffJar,
+    body: JSON.stringify({ ticketNumber: tn, method: "manual" }),
+  });
+  assert(byNum.ok, `Check-in by ticket number: ${JSON.stringify(byNumJ)}`);
+  assert(byNumJ.attendee && (byNumJ.attendee as { ticketNumber: string }).ticketNumber === tn);
+  pass("Staff check-in works with printed ticket number");
+
+  // Talent verify rejects number alone; accepts number + voting code
+  const { res: tnAlone } = await req("/api/tickets/verify", {
+    method: "POST",
+    body: JSON.stringify({ ticket: tn }),
+  });
+  assert(tnAlone.status === 401, "Ticket number alone cannot talent-verify");
+  const { res: tnVote, json: tnVoteJ } = await req("/api/tickets/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      ticket: tn,
+      votingCredential: numGuest.votingCredential,
+    }),
+  });
+  assert(tnVote.ok, `Ticket number + voting code verify: ${JSON.stringify(tnVoteJ)}`);
+  assert(typeof tnVoteJ.ticketToken === "string", "Verify returns opaque token for follow-on");
+  pass("Talent verify accepts ticket number with voting code");
+
   console.log(results.join("\n"));
   console.log(`\nDuplicate/recovery tests passed (${results.length}).`);
 }

@@ -146,19 +146,22 @@ export function VoteClient({
   async function login(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const { extractTicketToken } = await import("@/lib/tickets");
-    const token = extractTicketToken(ticketToken) || ticketToken.trim();
+    const raw = ticketToken.trim();
     const res = await fetch("/api/auth/voter/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticketToken: token, votingCredential }),
+      body: JSON.stringify({ ticketToken: raw, votingCredential }),
     });
     const data = await res.json();
     if (!res.ok) {
       setError(data.error || "Login failed.");
       return;
     }
-    localStorage.setItem("uilc_ticket_token", token);
+    const storedToken =
+      typeof data.ticketToken === "string" && data.ticketToken
+        ? data.ticketToken
+        : raw;
+    localStorage.setItem("uilc_ticket_token", storedToken);
     localStorage.setItem("uilc_voting_credential", votingCredential.trim());
     await refresh();
   }
@@ -209,8 +212,8 @@ export function VoteClient({
             <div className="space-y-3">
               <p className="text-sm font-extrabold text-[var(--ink)]">Your entry ticket</p>
               <p className="text-xs text-[var(--ink-soft)]">
-                Scan or upload the same QR shown at the door — your voting code fills in
-                automatically when the ticket QR includes it. Paste backup still works.
+                Scan the door QR, paste your ticket link, or type your printed ticket
+                number (UIJ2026-#####-NN) with your voting code.
               </p>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -233,14 +236,14 @@ export function VoteClient({
               <div id={readerId.current} className="overflow-hidden rounded-xl" />
               <div>
                 <label className="label" htmlFor="ticketToken">
-                  Ticket link (backup)
+                  Ticket link or ticket number
                 </label>
                 <textarea
                   id="ticketToken"
                   className="field min-h-24 font-mono text-sm"
                   value={ticketToken}
                   onChange={(e) => setTicketToken(e.target.value)}
-                  placeholder="Paste ticket link or code"
+                  placeholder="Ticket link or UIJ2026-#####-NN"
                   required
                 />
               </div>

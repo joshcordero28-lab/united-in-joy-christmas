@@ -28,6 +28,20 @@ export function normalizeTicketNumber(input: string): string | null {
   return raw;
 }
 
+/** True when input is a human ticket number (not an opaque link/token). */
+export function isTicketNumberInput(input: string): boolean {
+  return Boolean(normalizeTicketNumber(input));
+}
+
+/** True when input is a booking reference (without ticket suffix). */
+export function isBookingRefInput(input: string): boolean {
+  const raw = input.trim();
+  if (!raw) return false;
+  // Ticket numbers also start with the booking prefix — exclude those.
+  if (normalizeTicketNumber(raw)) return false;
+  return Boolean(normalizeBookingRef(raw));
+}
+
 export function formatBookingRef(sequence: number): string {
   if (!Number.isInteger(sequence) || sequence < 1 || sequence > 99999) {
     throw new Error("Booking sequence out of range");

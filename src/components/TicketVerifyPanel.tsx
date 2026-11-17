@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { isTicketNumberInput } from "@/lib/booking-ref";
 
 export type VerifiedAttendee = {
   id: string;
@@ -12,9 +13,11 @@ export type VerifiedAttendee = {
 type VerifyResponse = {
   ok?: boolean;
   attendee?: VerifiedAttendee;
+  ticketToken?: string;
   error?: string;
   code?: string;
   registerUrl?: string;
+  findUrl?: string | null;
 };
 
 type Props = {
@@ -35,12 +38,15 @@ export function TicketVerifyPanel({
   verifiedLabel,
 }: Props) {
   const [ticket, setTicket] = useState(initialTicket);
+  const [votingCredential, setVotingCredential] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [registerUrl, setRegisterUrl] = useState<string | null>(null);
+  const [findUrl, setFindUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const html5Ref = useRef<{ stop: () => Promise<void> } | null>(null);
   const readerId = useRef(`qr-verify-${Math.random().toString(36).slice(2, 9)}`);
+  const needsVoteCode = isTicketNumberInput(ticket);
 
   useEffect(() => {
     setTicket(initialTicket);
@@ -52,24 +58,31 @@ export function TicketVerifyPanel({
     };
   }, []);
 
-  async function verify(raw: string) {
+  async function verify(raw: string, voteCode?: string) {
     setLoading(true);
     setError(null);
     setRegisterUrl(null);
+    setFindUrl(null);
     try {
+      const payload: Record<string, string> = { ticket: raw };
+      const vote = (voteCode || votingCredential || "").trim();
+      if (vote) payload.votingCredential = vote;
+
       const res = await fetch("/api/tickets/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket: raw }),
+        body: JSON.stringify(payload),
       });
       const data = (await res.json()) as VerifyResponse;
       if (!res.ok || !data.attendee) {
         setError(data.error || "Could not verify this ticket.");
         setRegisterUrl(data.registerUrl || "/register");
+        if (data.findUrl) setFindUrl(data.findUrl);
         return;
       }
+      // Prefer opaque token so follow-on APIs keep working after number+code verify.
       onVerified({
-        ticket: raw,
+        ticket: data.ticketToken || raw,
         attendee: data.attendee,
       });
     } catch {
@@ -81,7 +94,7 @@ export function TicketVerifyPanel({
 
   async function onManual(e: FormEvent) {
     e.preventDefault();
-    await verify(ticket);
+    await verify(ticket, votingCredential);
   }
 
   async function toggleScan() {
@@ -175,16 +188,32 @@ export function TicketVerifyPanel({
           <div id={readerId.current} className="overflow-hidden rounded-xl" />
           <form onSubmit={onManual} className="space-y-2">
             <label className="label" htmlFor={`${readerId.current}-manual`}>
-              Or enter private ticket code / link
+              Ticket link or ticket number
             </label>
             <textarea
               id={`${readerId.current}-manual`}
               className="field min-h-20 font-mono text-sm"
               value={ticket}
               onChange={(e) => setTicket(e.target.value)}
-              placeholder="Paste private ticket code or ticket link"
+              placeholder="Paste ticket link, or type UIJ2026-#####-NN"
               required
             />
+            {needsVoteCode && (
+              <div>
+                <label className="label" htmlFor={`${readerId.current}-vote`}>
+                  Voting code (required with ticket number)
+                </label>
+                <input
+                  id={`${readerId.current}-vote`}
+                  className="field font-mono"
+                  value={votingCredential}
+                  onChange={(e) => setVotingCredential(e.target.value.toUpperCase())}
+                  placeholder="From your ticket stub"
+                  autoComplete="one-time-code"
+                  required
+                />
+              </div>
+            )}
             <button className="btn btn-primary w-full" type="submit" disabled={loading}>
               {loading ? "Verifying…" : "Verify registration"}
             </button>
@@ -195,6 +224,11 @@ export function TicketVerifyPanel({
       {error && (
         <div className="space-y-2">
           <p className="text-sm font-semibold text-[var(--red)]">{error}</p>
+          {findUrl && (
+            <Link href={findUrl} className="btn btn-secondary !min-h-10 w-full !text-sm">
+              Find My Tickets
+            </Link>
+          )}
           {registerUrl && (
             <Link href={registerUrl} className="btn btn-secondary !min-h-10 w-full !text-sm">
               Register for the event

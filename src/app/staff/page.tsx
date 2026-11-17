@@ -61,8 +61,13 @@ export default function StaffPage() {
   async function checkIn(value: string, method: "qr" | "manual") {
     setError(null);
     setMessage(null);
+    const raw = value.trim();
+    const { normalizeTicketNumber } = await import("@/lib/booking-ref");
     const { extractTicketToken } = await import("@/lib/tickets");
-    const payload = { token: extractTicketToken(value) || value, method };
+    const ticketNumber = normalizeTicketNumber(raw);
+    const payload = ticketNumber
+      ? { ticketNumber, method }
+      : { token: extractTicketToken(raw) || raw, method };
 
     const res = await fetch("/api/checkin", {
       method: "POST",
@@ -75,7 +80,8 @@ export default function StaffPage() {
       if (data.attendee?.id) setLastCheckedId(data.attendee.id);
       return;
     }
-    setMessage(`Checked in: ${data.attendee.fullName}`);
+    const tn = data.attendee.ticketNumber ? ` · ${data.attendee.ticketNumber}` : "";
+    setMessage(`Checked in: ${data.attendee.fullName}${tn}`);
     setLastCheckedId(data.attendee.id);
     setToken("");
   }
@@ -191,8 +197,8 @@ export default function StaffPage() {
       <div className="mx-auto max-w-lg px-4 py-8">
         <h1 className="brand-mark text-4xl text-[var(--red)]">Staff check-in</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Scan entry QR codes, or paste a ticket link as backup. Duplicate check-ins
-          are blocked.
+          Scan entry QR codes, or enter the printed ticket number (UIJ2026-#####-NN)
+          or ticket link as backup. Duplicate check-ins are blocked.
         </p>
 
         {!staff ? (
@@ -260,13 +266,14 @@ export default function StaffPage() {
             >
               <div>
                 <label className="label" htmlFor="token">
-                  Ticket link (backup if QR won&apos;t scan)
+                  Ticket number or ticket link (backup if QR won&apos;t scan)
                 </label>
                 <textarea
                   id="token"
                   className="field min-h-28 font-mono text-sm"
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
+                  placeholder="UIJ2026-00425-01 or paste ticket link"
                   required
                 />
               </div>
