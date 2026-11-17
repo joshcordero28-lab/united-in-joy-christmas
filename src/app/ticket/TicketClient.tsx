@@ -6,7 +6,9 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
 import { CcfMark } from "@/components/CcfMark";
 import { ManageMyTicketsLink } from "@/components/ManageMyTicketsLink";
+import { isBookingRefInput, isTicketNumberInput, normalizeTicketNumber } from "@/lib/booking-ref";
 import { extractTicketToken } from "@/lib/tickets";
+import Link from "next/link";
 
 type TicketView = {
   fullName: string;
@@ -44,7 +46,19 @@ export function TicketClient() {
   const [loading, setLoading] = useState(true);
 
   async function loadTicket(raw: string) {
-    const cleaned = extractTicketToken(raw);
+    const trimmed = raw.trim();
+    if (isTicketNumberInput(trimmed) || isBookingRefInput(trimmed)) {
+      setView(null);
+      setLoading(false);
+      const tn = normalizeTicketNumber(trimmed);
+      setError(
+        tn
+          ? `Ticket numbers open via Find My Tickets (number + booking access code). Your number: ${tn}`
+          : "Booking references open via Find My Tickets with your private access code — not here.",
+      );
+      return;
+    }
+    const cleaned = extractTicketToken(trimmed);
     if (!cleaned || cleaned.length < 16) {
       setView(null);
       setLoading(false);
@@ -198,14 +212,24 @@ export function TicketClient() {
                 <CopyLinkButton link={view.link} />
                 <details className="rounded-xl bg-black/15 px-3 py-2 text-left text-sm text-white/85">
                   <summary className="cursor-pointer font-semibold text-[var(--gold-soft)]">
-                    Staff backup reference
+                    Alternate verification (no QR)
                   </summary>
                   <p className="mt-2 text-xs leading-relaxed text-white/75">
-                    If the QR won&apos;t scan, staff can look up reference{" "}
+                    If the QR won&apos;t scan, show staff your ticket number{" "}
                     <span className="font-mono font-bold tracking-wider text-white">
-                      {view.staffRef}
+                      {view.ticketNumber || view.staffRef}
                     </span>
-                    . Guests normally only need the QR above.
+                    {view.bookingRef ? (
+                      <>
+                        {" "}
+                        (booking{" "}
+                        <span className="font-mono font-bold tracking-wider text-white">
+                          {view.bookingRef}
+                        </span>
+                        )
+                      </>
+                    ) : null}
+                    . Staff can check you in with that number.
                   </p>
                 </details>
               </div>
@@ -216,8 +240,8 @@ export function TicketClient() {
           <>
             <h1 className="brand-mark text-4xl text-[var(--red)]">Open my ticket</h1>
             <p className="mt-2 text-[var(--ink-soft)]">
-              Use the link from registration, or paste it here to reopen your QR entry
-              ticket. For a whole group booking, use Find tickets instead.
+              Paste your private ticket link to reopen the QR. If you only have a booking
+              or ticket reference number, use Find My Tickets instead.
             </p>
             <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
               <div>
@@ -233,14 +257,21 @@ export function TicketClient() {
                   required
                 />
               </div>
-              {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
+              {error && (
+                <div className="space-y-2">
+                  <p className="font-semibold text-[var(--red)]">{error}</p>
+                  <Link href="/find" className="btn btn-secondary w-full">
+                    Find My Tickets with reference number
+                  </Link>
+                </div>
+              )}
               <button className="btn btn-primary w-full" type="submit">
                 Show my QR ticket
               </button>
               <p className="text-center text-sm text-[var(--ink-soft)]">
-                Looking for every ticket in a booking?{" "}
+                Have a booking or ticket number?{" "}
                 <ManageMyTicketsLink className="font-semibold text-[var(--red)] underline">
-                  Manage My Tickets
+                  Find My Tickets
                 </ManageMyTicketsLink>
               </p>
             </form>

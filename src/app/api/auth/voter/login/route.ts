@@ -6,10 +6,10 @@ import { getVoterSession } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
 import { getPublicVotingGate } from "@/lib/voting-public";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
-import { parseAppTicketCredential } from "@/lib/tickets";
+import { resolveAttendeeByCredential } from "@/lib/resolve-attendee";
 
 const schema = z.object({
-  /// Opaque token, ticket URL/QR payload, or hash link — parsed server-side.
+  /// Opaque token/URL/QR, or printed ticket number UIJ2026-#####-NN.
   ticketToken: z.string().min(8).max(500),
   votingCredential: z.string().min(4).max(40),
 });
@@ -33,15 +33,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid login details." }, { status: 400 });
     }
 
-    const ticketToken = parseAppTicketCredential(parsed.data.ticketToken);
-    if (ticketToken.length < 16) {
+    const resolved = await resolveAttendeeByCredential(parsed.data.ticketToken);
+    if (!resolved.ok) {
       return NextResponse.json({ error: "Invalid ticket." }, { status: 401 });
     }
 
     const event = await getEventConfig();
 
     const attendee = await prisma.attendee.findUnique({
-      where: { ticketToken },
+      where: { id: resolved.attendeeId },
     });
 
     if (!attendee || attendee.status !== "ISSUED") {
@@ -69,7 +69,12 @@ export async function POST(request: Request) {
     session.isLoggedIn = true;
     await session.save();
 
-    return NextResponse.json({ ok: true, fullName: attendee.fullName });
+    return NextResponse.json({
+      ok: true,
+      fullName: attendee.fullName,
+      ticketToken: resolved.ticketToken,
+      ticketNumber: resolved.ticketNumber,
+    });
   } catch (err) {
     console.error("voter login failed", err);
     return NextResponse.json({ error: "Login failed." }, { status: 500 });

@@ -1,10 +1,13 @@
 import { TicketStatus } from "@prisma/client";
 import { prisma } from "./db";
+import { isBookingRefInput, isTicketNumberInput, normalizeTicketNumber } from "./booking-ref";
 import { parseAppTicketCredential } from "./tickets";
 
 export type TicketVerifyOk = {
   ok: true;
   attendee: { id: string; fullName: string; status: "ISSUED" };
+  /** Opaque bearer to use for subsequent talent APIs (always present on success). */
+  ticketToken: string;
   /** Same registration party, ISSUED only — for selecting partners without rescanning. */
   partyAttendees: { id: string; fullName: string }[];
 };
@@ -12,28 +15,106 @@ export type TicketVerifyOk = {
 export type TicketVerifyErr = {
   ok: false;
   status: number;
-  code: "invalid" | "pending" | "revoked" | "removed" | "not_registered";
+  code:
+    | "invalid"
+    | "pending"
+    | "revoked"
+    | "removed"
+    | "not_registered"
+    | "needs_access"
+    | "use_ticket_number_with_code";
   error: string;
   registerUrl: "/register";
+  findUrl?: "/find";
 };
 
 /**
  * Validate a ticket credential against the attendee DB.
+ * Accepts opaque ticket links/tokens, or a printed ticket number when paired
+ * with the voting code (passed via options.votingCredential).
  * Does not check in, revoke, or touch voting entitlements.
  */
 export async function verifyAttendeeTicket(
   rawTicket: string,
-  options: { includeParty?: boolean } = {},
+  options: { includeParty?: boolean; votingCredential?: string | null } = {},
 ): Promise<TicketVerifyOk | TicketVerifyErr> {
-  const token = parseAppTicketCredential(rawTicket);
-  if (token.length < 16) {
+  const raw = (rawTicket || "").trim();
+
+  // Human references are not opaque secrets — never unlock talent verify from a
+  // number alone. Ticket number + voting code is allowed; booking ref alone is not.
+  if (isBookingRefInput(raw)) {
     return {
       ok: false,
-      status: 400,
-      code: "invalid",
-      error: "That does not look like an event ticket. Register first, then try again.",
+      status: 401,
+      code: "needs_access",
+      error:
+        "A booking reference alone cannot verify a ticket. Open Find My Tickets with your booking reference and private access code, then use an individual ticket link.",
       registerUrl: "/register",
+      findUrl: "/find",
     };
+  }
+
+  let token = "";
+  if (isTicketNumberInput(raw)) {
+    const tn = normalizeTicketNumber(raw)!;
+    const vote = (options.votingCredential || "").trim();
+    if (vote.length < 4) {
+      return {
+        ok: false,
+        status: 401,
+        code: "use_ticket_number_with_code",
+        error:
+          "Ticket numbers need your voting code (or recover the ticket link via Find My Tickets).",
+        registerUrl: "/register",
+        findUrl: "/find",
+      };
+    }
+    const { verifyVotingCredential } = await import("./crypto");
+    const byNumber = await prisma.attendee.findUnique({
+      where: { ticketNumber: tn },
+      select: {
+        id: true,
+        fullName: true,
+        status: true,
+        ticketToken: true,
+        votingCredentialHash: true,
+        registrationPartyId: true,
+      },
+    });
+    if (!byNumber) {
+      return {
+        ok: false,
+        status: 404,
+        code: "not_registered",
+        error: "No registration found for this ticket. Register for the event first.",
+        registerUrl: "/register",
+      };
+    }
+    const voteOk = await verifyVotingCredential(vote, byNumber.votingCredentialHash);
+    if (!voteOk) {
+      return {
+        ok: false,
+        status: 401,
+        code: "invalid",
+        error: "Ticket number or voting code is incorrect.",
+        registerUrl: "/register",
+        findUrl: "/find",
+      };
+    }
+    token = byNumber.ticketToken;
+  } else {
+    token = parseAppTicketCredential(raw);
+    if (token.length < 16) {
+      return {
+        ok: false,
+        status: 400,
+        code: "invalid",
+        error:
+          "That does not look like an event ticket. Paste your ticket link, or use your ticket number with your voting code.",
+        registerUrl: "/register",
+        findUrl: "/find",
+      };
+    }
   }
 
   const attendee = await prisma.attendee.findUnique({
@@ -42,6 +123,7 @@ export async function verifyAttendeeTicket(
       id: true,
       fullName: true,
       status: true,
+      ticketToken: true,
       registrationPartyId: true,
     },
   });
@@ -117,6 +199,7 @@ export async function verifyAttendeeTicket(
       fullName: attendee.fullName,
       status: "ISSUED",
     },
+    ticketToken: attendee.ticketToken,
     partyAttendees,
   };
 }

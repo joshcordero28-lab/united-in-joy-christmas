@@ -98,7 +98,7 @@ async function main() {
       method: "POST",
       body: JSON.stringify({
         managerName: `GT Mgr ${size} ${stamp}`,
-        phone: "555-2000",
+        phone: `92${size}${String(stamp).slice(-7)}`,
         attendees,
       }),
     });

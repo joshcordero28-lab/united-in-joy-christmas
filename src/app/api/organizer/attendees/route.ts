@@ -43,6 +43,7 @@ export async function GET(request: Request) {
                   { fullName: { contains: q, mode: "insensitive" } },
                   { email: { contains: q, mode: "insensitive" } },
                   { phone: { contains: q, mode: "insensitive" } },
+                  { ticketNumber: { contains: q, mode: "insensitive" } },
                   {
                     registrationParty: {
                       managerName: { contains: q, mode: "insensitive" },
@@ -56,6 +57,11 @@ export async function GET(request: Request) {
                   {
                     registrationParty: {
                       contactPhone: { contains: q, mode: "insensitive" },
+                    },
+                  },
+                  {
+                    registrationParty: {
+                      bookingRef: { contains: q, mode: "insensitive" },
                     },
                   },
                 ],
@@ -89,12 +95,14 @@ export async function GET(request: Request) {
         removedAt: true,
         removalReason: true,
         registrationPartyId: true,
+        ticketNumber: true,
         registrationParty: {
           select: {
             id: true,
             managerName: true,
             contactPhone: true,
             contactEmail: true,
+            bookingRef: true,
           },
         },
         audienceVotes: {
@@ -159,6 +167,8 @@ export async function GET(request: Request) {
           phone: isOrganizer ? a.phone : maskContact(a.phone),
           email: isOrganizer ? a.email : maskContact(a.email),
           status: a.status,
+          ticketNumber: a.ticketNumber,
+          bookingRef: a.registrationParty.bookingRef,
           ticketRef: ticketStaffRef(a.ticketToken),
           registeredAt: a.registeredAt,
           issuedAt: a.issuedAt,

@@ -8,6 +8,11 @@ import {
   hashVotingCredential,
 } from "@/lib/crypto";
 import { formatTicketNumber, nextBookingRef } from "@/lib/booking-ref";
+import { findPossibleDuplicate } from "@/lib/duplicate-check";
+import {
+  getIdempotentResponse,
+  saveIdempotentResponse,
+} from "@/lib/idempotency";
 import { clientIp, rateLimit, rateLimitConsume } from "@/lib/rate-limit";
 import { writeAudit } from "@/lib/audit";
 import { TicketStatus } from "@prisma/client";
@@ -34,6 +39,10 @@ const schema = z.object({
   attendees: z.array(attendeeSchema).min(1).max(MAX_ATTENDEES_PER_REGISTRATION).optional(),
   /** Honeypot — must stay empty. */
   company: z.string().max(200).optional().or(z.literal("")),
+  /** Client-generated key to make retries / double-clicks idempotent. */
+  idempotencyKey: z.string().trim().min(8).max(120).optional(),
+  /** User confirmed this is a different person after a soft duplicate warning. */
+  confirmNewPerson: z.boolean().optional(),
 });
 
 function resolveNames(data: z.infer<typeof schema>): {
@@ -88,11 +97,40 @@ export async function POST(request: Request) {
       });
     }
 
+    const idempotencyKey = parsed.data.idempotencyKey?.trim() || "";
+    if (idempotencyKey) {
+      const prior = await getIdempotentResponse(idempotencyKey);
+      if (prior) {
+        return NextResponse.json(prior);
+      }
+    }
+
     const resolved = resolveNames(parsed.data);
     if (!resolved) {
       return NextResponse.json({ error: "Invalid registration details." }, { status: 400 });
     }
     const { managerName, attendeeNames } = resolved;
+
+    if (!parsed.data.confirmNewPerson) {
+      const dup = await findPossibleDuplicate({
+        fullName: managerName,
+        email: parsed.data.email,
+        phone: parsed.data.phone,
+        attendeeNames,
+      });
+      if (dup.possibleDuplicate) {
+        return NextResponse.json(
+          {
+            error:
+              "It looks like you may already be registered for United in Joy Christmas 2026.",
+            code: "possible_duplicate",
+            matchKind: dup.matchKind ?? null,
+            // Intentionally omit booking refs / tokens / other guests' PII.
+          },
+          { status: 409 },
+        );
+      }
+    }
 
     if (attendeeNames.length < 1) {
       return NextResponse.json(
@@ -245,7 +283,7 @@ export async function POST(request: Request) {
     const count = created.attendeeRows.length;
     const bookingRef = created.party.bookingRef;
 
-    return NextResponse.json({
+    const payload = {
       partyId: created.party.id,
       bookingRef,
       managerName: created.party.managerName,
@@ -258,13 +296,20 @@ export async function POST(request: Request) {
       ticketToken: primary?.ticketToken ?? null,
       votingCredential: primary?.votingCredential ?? null,
       attendees: created.attendeeRows,
+      attendeeCount: count,
       message:
         status === TicketStatus.PENDING
           ? `Registration received for ${count} attendee${count === 1 ? "" : "s"}. Booking reference ${bookingRef}. Tickets will be issued after approval.`
           : count > 1
-            ? `Registered ${count} attendees successfully. Booking reference ${bookingRef}. Save your private booking link to manage every ticket.`
-            : `Registration complete. Booking reference ${bookingRef}. Save your ticket and private booking link.`,
-    });
+            ? `Registered ${count} attendees successfully. Booking reference ${bookingRef}. You can retrieve your tickets anytime using your booking reference — you do not need to register again.`
+            : `Registration complete. Booking reference ${bookingRef}. You can retrieve your tickets anytime using your booking reference — you do not need to register again.`,
+    };
+
+    if (idempotencyKey) {
+      await saveIdempotentResponse(idempotencyKey, payload);
+    }
+
+    return NextResponse.json(payload);
   } catch (err) {
     console.error("register failed", err);
     return NextResponse.json({ error: "Registration failed." }, { status: 500 });

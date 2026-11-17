@@ -4,9 +4,14 @@ import { prisma } from "@/lib/db";
 import { getStaffSession, requireStaff } from "@/lib/session";
 import { writeAudit } from "@/lib/audit";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { normalizeTicketNumber } from "@/lib/booking-ref";
+import { parseAppTicketCredential } from "@/lib/tickets";
 
 const schema = z.object({
-  token: z.string().min(16).max(200).optional(),
+  /** Opaque ticket token or full ticket URL/QR payload. */
+  token: z.string().min(8).max(500).optional(),
+  /** Printed ticket number e.g. UIJ2026-00425-01 (staff-auth alternate to QR). */
+  ticketNumber: z.string().min(8).max(40).optional(),
   attendeeId: z.string().optional(),
   method: z.enum(["qr", "manual"]).default("manual"),
 });
@@ -28,14 +33,46 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const parsed = schema.safeParse(body);
-    if (!parsed.success || (!parsed.data.token && !parsed.data.attendeeId)) {
-      return NextResponse.json({ error: "Provide a ticket token or attendee id." }, { status: 400 });
+    const hasId = Boolean(parsed.success && parsed.data.attendeeId);
+    const hasToken = Boolean(parsed.success && parsed.data.token);
+    const hasNumber = Boolean(parsed.success && parsed.data.ticketNumber);
+    if (!parsed.success || (!hasId && !hasToken && !hasNumber)) {
+      return NextResponse.json(
+        {
+          error:
+            "Provide a ticket QR/link, printed ticket number (UIJ2026-#####-NN), or attendee id.",
+        },
+        { status: 400 },
+      );
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const attendee = parsed.data.token
-        ? await tx.attendee.findUnique({ where: { ticketToken: parsed.data.token } })
-        : await tx.attendee.findUnique({ where: { id: parsed.data.attendeeId! } });
+      let attendee = null;
+      if (parsed.data.attendeeId) {
+        attendee = await tx.attendee.findUnique({ where: { id: parsed.data.attendeeId } });
+      } else if (parsed.data.ticketNumber) {
+        const tn = normalizeTicketNumber(parsed.data.ticketNumber);
+        if (!tn) {
+          return {
+            status: 400 as const,
+            error: "Invalid ticket number. Use the printed form UIJ2026-#####-NN.",
+          };
+        }
+        attendee = await tx.attendee.findUnique({ where: { ticketNumber: tn } });
+      } else if (parsed.data.token) {
+        const token = parseAppTicketCredential(parsed.data.token);
+        if (token.length < 16) {
+          // Staff may paste a ticket number into the token field — accept it.
+          const tn = normalizeTicketNumber(parsed.data.token);
+          if (tn) {
+            attendee = await tx.attendee.findUnique({ where: { ticketNumber: tn } });
+          } else {
+            return { status: 400 as const, error: "Invalid ticket credential." };
+          }
+        } else {
+          attendee = await tx.attendee.findUnique({ where: { ticketToken: token } });
+        }
+      }
 
       if (!attendee) {
         return { status: 404 as const, error: "Ticket not found." };
@@ -135,7 +172,7 @@ export async function POST(request: Request) {
       action: "checkin.success",
       entityType: "Attendee",
       entityId: result.attendee.id,
-      detail: `method=${parsed.data.method}`,
+      detail: `method=${parsed.data.method};ticketNumber=${result.attendee.ticketNumber}`,
     });
 
     return NextResponse.json({
@@ -143,6 +180,7 @@ export async function POST(request: Request) {
       attendee: {
         id: result.attendee.id,
         fullName: result.attendee.fullName,
+        ticketNumber: result.attendee.ticketNumber,
         checkedInAt: result.attendee.checkedInAt,
       },
     });
