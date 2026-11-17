@@ -15,7 +15,8 @@
     "test:group-tickets": "tsx scripts/test-group-tickets.ts",
     "test:duplicate-recovery": "tsx scripts/test-duplicate-recovery.ts",
     "test:private-code-voting": "tsx scripts/test-private-code-voting.ts",
-    "test:permanent-delete-checkin": "tsx scripts/test-permanent-delete-checkin.ts"
+    "test:permanent-delete-checkin": "tsx scripts/test-permanent-delete-checkin.ts",
+    "test:final-integration": "tsx scripts/test-final-integration.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
