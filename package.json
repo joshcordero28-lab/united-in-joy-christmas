@@ -14,7 +14,8 @@
     "test:flow": "tsx scripts/test-flow.ts",
     "test:group-tickets": "tsx scripts/test-group-tickets.ts",
     "test:duplicate-recovery": "tsx scripts/test-duplicate-recovery.ts",
-    "test:private-code-voting": "tsx scripts/test-private-code-voting.ts"
+    "test:private-code-voting": "tsx scripts/test-private-code-voting.ts",
+    "test:permanent-delete-checkin": "tsx scripts/test-permanent-delete-checkin.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

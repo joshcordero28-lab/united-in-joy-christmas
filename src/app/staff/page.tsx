@@ -11,10 +11,20 @@ type StaffAttendee = {
   id: string;
   fullName: string;
   status: string;
+  ticketNumber?: string | null;
   ticketRef?: string | null;
   checkedInAt: string | null;
+  checkInMethod?: string | null;
   managerName?: string;
   voteGroupName?: string | null;
+  partyMembers?: {
+    id: string;
+    fullName: string;
+    ticketNumber?: string | null;
+    status: string;
+    checkedInAt: string | null;
+    checkInMethod?: string | null;
+  }[];
 };
 
 export default function StaffPage() {
@@ -30,6 +40,8 @@ export default function StaffPage() {
   const [lastCheckedId, setLastCheckedId] = useState<string | null>(null);
   const [removeQ, setRemoveQ] = useState("");
   const [removeHits, setRemoveHits] = useState<StaffAttendee[]>([]);
+  const [checkInQ, setCheckInQ] = useState("");
+  const [checkInHits, setCheckInHits] = useState<StaffAttendee[]>([]);
 
   useEffect(() => {
     return () => {
@@ -58,32 +70,63 @@ export default function StaffPage() {
     setStaff(null);
   }
 
-  async function checkIn(value: string, method: "qr" | "manual") {
+  async function checkIn(
+    valueOrId: string,
+    method: "qr" | "manual",
+    byAttendeeId = false,
+  ) {
     setError(null);
     setMessage(null);
-    const raw = value.trim();
-    const { normalizeTicketNumber } = await import("@/lib/booking-ref");
-    const { extractTicketToken } = await import("@/lib/tickets");
-    const ticketNumber = normalizeTicketNumber(raw);
-    const payload = ticketNumber
-      ? { ticketNumber, method }
-      : { token: extractTicketToken(raw) || raw, method };
+
+    let body: Record<string, string>;
+    if (byAttendeeId) {
+      body = { attendeeId: valueOrId, method };
+    } else {
+      const raw = valueOrId.trim();
+      const { normalizeTicketNumber } = await import("@/lib/booking-ref");
+      const { extractTicketToken } = await import("@/lib/tickets");
+      const ticketNumber = normalizeTicketNumber(raw);
+      body = ticketNumber
+        ? { ticketNumber, method }
+        : { token: extractTicketToken(raw) || raw, method };
+    }
 
     const res = await fetch("/api/checkin", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) {
-      setError(data.error || "Check-in failed.");
+      const when = data.checkedInAt || data.attendee?.checkedInAt;
+      const methodUsed = data.checkInMethod || data.attendee?.checkInMethod;
+      setError(
+        data.error === "Already Checked In" || res.status === 409
+          ? `Already Checked In${methodUsed ? ` via ${methodUsed}` : ""}${
+              when ? ` at ${new Date(when).toLocaleString()}` : ""
+            }.`
+          : data.error || "Check-in failed.",
+      );
       if (data.attendee?.id) setLastCheckedId(data.attendee.id);
       return;
     }
     const tn = data.attendee.ticketNumber ? ` · ${data.attendee.ticketNumber}` : "";
-    setMessage(`Checked in: ${data.attendee.fullName}${tn}`);
+    setMessage(`Checked in: ${data.attendee.fullName}${tn} (${method})`);
     setLastCheckedId(data.attendee.id);
     setToken("");
+  }
+
+  async function searchForCheckIn() {
+    setError(null);
+    const res = await fetch(
+      `/api/organizer/attendees?q=${encodeURIComponent(checkInQ.trim())}`,
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      setError(data.error || "Search failed.");
+      return;
+    }
+    setCheckInHits((data.attendees || []).filter((a: StaffAttendee) => a.status === "ISSUED"));
   }
 
   async function undo() {
@@ -197,8 +240,8 @@ export default function StaffPage() {
       <div className="mx-auto max-w-lg px-4 py-8">
         <h1 className="brand-mark text-4xl text-[var(--red)]">Staff check-in</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Scan entry QR codes, or enter the printed ticket number (UIJ2026-#####-NN)
-          or ticket link as backup. Duplicate check-ins are blocked.
+          Scan entry QR codes, or check guests in manually by ticket number, ticket
+          link, or name search. Duplicate check-ins are blocked.
         </p>
 
         {!staff ? (
@@ -278,9 +321,83 @@ export default function StaffPage() {
                 />
               </div>
               <button className="btn btn-primary w-full" type="submit">
-                Check in
+                Check In Manually
               </button>
             </form>
+
+            <div className="panel space-y-3 p-5">
+              <h2 className="font-extrabold text-[var(--red)]">Find guest · manual check-in</h2>
+              <p className="text-sm text-[var(--ink-soft)]">
+                Search by name or ticket number, verify identity, then check in one
+                guest at a time. Group members are listed separately — absent guests
+                stay unchecked.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  className="field"
+                  placeholder="Search name or ticket #"
+                  value={checkInQ}
+                  onChange={(e) => setCheckInQ(e.target.value)}
+                />
+                <button type="button" className="btn btn-secondary" onClick={searchForCheckIn}>
+                  Search
+                </button>
+              </div>
+              <ul className="space-y-2">
+                {checkInHits.map((a) => (
+                  <li
+                    key={a.id}
+                    className="rounded-xl border border-[var(--red)]/10 p-3 text-sm"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{a.fullName}</p>
+                        <p className="text-xs text-[var(--ink-soft)]">
+                          {a.ticketNumber || a.ticketRef || "—"}
+                          {a.checkedInAt
+                            ? ` · Already Checked In${a.checkInMethod ? ` (${a.checkInMethod})` : ""}`
+                            : " · not checked in"}
+                        </p>
+                      </div>
+                      {!a.checkedInAt ? (
+                        <button
+                          type="button"
+                          className="btn btn-primary !min-h-10 !px-3 !text-sm"
+                          onClick={() => checkIn(a.id, "manual", true)}
+                        >
+                          Check In Manually
+                        </button>
+                      ) : null}
+                    </div>
+                    {a.partyMembers && a.partyMembers.length > 1 && (
+                      <ul className="mt-2 space-y-1 border-t border-[var(--red)]/10 pt-2 text-xs">
+                        {a.partyMembers
+                          .filter((m) => m.id !== a.id && m.status === "ISSUED")
+                          .map((m) => (
+                            <li key={m.id} className="flex items-center justify-between gap-2">
+                              <span>
+                                {m.fullName}
+                                {m.checkedInAt
+                                  ? ` · Already Checked In${m.checkInMethod ? ` (${m.checkInMethod})` : ""}`
+                                  : " · not checked in"}
+                              </span>
+                              {!m.checkedInAt && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary !min-h-8 !px-2 !text-xs"
+                                  onClick={() => checkIn(m.id, "manual", true)}
+                                >
+                                  Check In Manually
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
 
             {lastCheckedId && (
               <button type="button" className="btn btn-danger w-full" onClick={undo}>

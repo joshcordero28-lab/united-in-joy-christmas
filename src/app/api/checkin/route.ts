@@ -92,9 +92,10 @@ export async function POST(request: Request) {
       if (attendee.checkedInAt) {
         return {
           status: 409 as const,
-          error: "Already checked in.",
+          error: "Already Checked In",
           attendee,
           checkedInAt: attendee.checkedInAt,
+          checkInMethod: attendee.checkInMethod,
         };
       }
 
@@ -119,9 +120,10 @@ export async function POST(request: Request) {
         if (latest?.checkedInAt) {
           return {
             status: 409 as const,
-            error: "Already checked in.",
+            error: "Already Checked In",
             attendee: latest,
             checkedInAt: latest.checkedInAt,
+            checkInMethod: latest.checkInMethod,
           };
         }
         return { status: 409 as const, error: "Check-in conflict. Retry.", attendee: latest || attendee };
@@ -153,12 +155,16 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: result.error,
+          checkedInAt: "checkedInAt" in result ? result.checkedInAt : undefined,
+          checkInMethod:
+            "checkInMethod" in result ? result.checkInMethod : undefined,
           attendee: result.attendee
             ? {
                 id: result.attendee.id,
                 fullName: result.attendee.fullName,
                 status: result.attendee.status,
                 checkedInAt: result.attendee.checkedInAt,
+                checkInMethod: result.attendee.checkInMethod,
               }
             : undefined,
         },
