@@ -34,6 +34,49 @@ export function manageUrl(baseUrl: string, managerToken: string): string {
 }
 
 /**
+ * Accept a raw manager/access token, or a /manage#… /find#… URL containing it.
+ */
+export function extractManagerToken(input: string): string {
+  const raw = input.trim();
+  if (!raw) return "";
+
+  try {
+    const u = new URL(raw, "https://local.invalid");
+    const path = u.pathname.replace(/\/$/, "");
+    if (u.hash && (path.endsWith("/manage") || path.endsWith("/find"))) {
+      try {
+        return decodeURIComponent(u.hash.slice(1));
+      } catch {
+        return u.hash.slice(1);
+      }
+    }
+  } catch {
+    // not a URL
+  }
+
+  if (raw.includes("/manage#") || raw.includes("/find#")) {
+    const hashIdx = raw.indexOf("#");
+    if (hashIdx >= 0) {
+      try {
+        return decodeURIComponent(raw.slice(hashIdx + 1));
+      } catch {
+        return raw.slice(hashIdx + 1);
+      }
+    }
+  }
+
+  if (raw.startsWith("#")) {
+    try {
+      return decodeURIComponent(raw.slice(1));
+    } catch {
+      return raw.slice(1);
+    }
+  }
+
+  return raw;
+}
+
+/**
  * Split a raw ticket hash / QR payload into token + optional voting code.
  */
 export function parseTicketPayload(input: string): TicketPayload {

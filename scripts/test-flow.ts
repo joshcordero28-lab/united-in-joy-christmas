@@ -69,6 +69,9 @@ async function main() {
           { id: { startsWith: "group-register:" } },
           { id: { startsWith: "ticket-verify:" } },
           { id: { startsWith: "from-ticket:" } },
+          { id: { startsWith: "booking-lookup:" } },
+          { id: { startsWith: "manage-view:" } },
+          { id: { startsWith: "ticket-view:" } },
         ],
       },
     });
@@ -528,10 +531,24 @@ async function main() {
   assert(partyRes.ok, `Party register failed: ${JSON.stringify(party)}`);
   assert(Array.isArray(party.attendees) && party.attendees.length === 5, "Party must create 5 tickets");
   assert(typeof party.managerToken === "string" && party.managerToken.length >= 16, "managerToken required");
-  const partyTokens = (party.attendees as { ticketToken: string; votingCredential: string; id: string; fullName: string }[]);
+  assert(
+    typeof party.bookingRef === "string" && /^UIJ2026-\d{5}$/.test(String(party.bookingRef)),
+    `bookingRef required, got ${party.bookingRef}`,
+  );
+  const partyTokens = (party.attendees as {
+    ticketToken: string;
+    votingCredential: string;
+    id: string;
+    fullName: string;
+    ticketNumber: string;
+  }[]);
   const tokenSet = new Set(partyTokens.map((t) => t.ticketToken));
   assert(tokenSet.size === 5, "Each attendee needs a unique ticket");
   assert(!tokenSet.has(String(party.managerToken)), "Manager token must not equal a ticket");
+  assert(
+    partyTokens.every((t, i) => t.ticketNumber === `${party.bookingRef}-${String(i + 1).padStart(2, "0")}`),
+    "Ticket numbers must follow bookingRef-NN",
+  );
   pass("Group registration creates separate tickets + manager token");
 
   const { json: manageBeforeCheckin } = await req("/api/manage/view", {
@@ -782,7 +799,122 @@ async function main() {
   });
   assert(soloRes.ok && solo.ticketToken && solo.managerToken, "Solo registration still works");
   assert(solo.attendees.length === 1, "Solo maps to party of one");
+  assert(typeof solo.bookingRef === "string", "Solo registration includes bookingRef");
   pass("Existing individual registration shape continues to work");
+
+  // --- Group ticket dashboard + secure lookup ---
+  {
+    const sizes = [1, 2, 5] as const;
+    for (const size of sizes) {
+      const attendees = Array.from({ length: size }, (_, i) => ({
+        fullName: `Lookup ${size}p ${i + 1} ${stamp}`,
+      }));
+      const { res: gRes, json: g } = await req("/api/register", {
+        method: "POST",
+        body: JSON.stringify({
+          managerName: `Lookup Mgr ${size} ${stamp}`,
+          attendees,
+        }),
+      });
+      assert(gRes.ok, `${size}-person register failed: ${JSON.stringify(g)}`);
+      assert(g.attendees.length === size, `${size}-person party size`);
+      assert(/^UIJ2026-\d{5}$/.test(String(g.bookingRef)), `${size}-person bookingRef`);
+
+      const { res: dashRes, json: dash } = await req("/api/manage/view", {
+        method: "POST",
+        body: JSON.stringify({ managerToken: g.managerToken }),
+      });
+      assert(dashRes.ok, `${size}-person manage view`);
+      assert(dash.bookingRef === g.bookingRef, "Dashboard bookingRef matches");
+      assert(dash.totalAttendees === size, "Dashboard totalAttendees");
+      assert(Array.isArray(dash.attendees) && dash.attendees.length === size, "Dashboard attendee cards");
+      assert(
+        (dash.attendees as { qr: string | null }[]).every((a) => typeof a.qr === "string" && a.qr.startsWith("data:")),
+        `${size}-person dashboard includes QR images`,
+      );
+
+      const { res: fullLookup, json: fullJ } = await req("/api/booking/lookup", {
+        method: "POST",
+        body: JSON.stringify({
+          bookingRef: g.bookingRef,
+          accessToken: g.managerToken,
+        }),
+      });
+      assert(fullLookup.ok && fullJ.mode === "booking", `${size}-person booking lookup`);
+      assert(fullJ.totalAttendees === size, "Lookup returns full group");
+
+      const first = (g.attendees as { ticketNumber: string; ticketToken: string; fullName: string })[0];
+      const { res: oneRes, json: oneJ } = await req("/api/booking/lookup", {
+        method: "POST",
+        body: JSON.stringify({ ticketNumber: first.ticketNumber }),
+      });
+      assert(oneRes.ok && oneJ.mode === "ticket", "Ticket-number lookup");
+      assert(oneJ.fullName === first.fullName, "Ticket lookup returns that attendee");
+      assert(!("attendees" in oneJ), "Ticket lookup must not include group attendees");
+      assert(!("managerToken" in oneJ) && !("manageLink" in oneJ), "Ticket lookup hides manage credentials");
+
+      // Check-in still per QR; no cross-check-in
+      const staffJarLocal = staffJar;
+      const { res: ciOne } = await req("/api/checkin", {
+        method: "POST",
+        jar: staffJarLocal,
+        body: JSON.stringify({ token: first.ticketToken, method: "manual" }),
+      });
+      assert(ciOne.ok, `${size}-person single check-in`);
+      const { json: afterCi } = await req("/api/manage/view", {
+        method: "POST",
+        body: JSON.stringify({ managerToken: g.managerToken }),
+      });
+      assert(afterCi.checkedInCount === 1, "Only one attendee checked in");
+      if (size > 1) {
+        const others = (afterCi.attendees as { checkedIn: boolean }[]).filter((a) => a.checkedIn);
+        assert(others.length === 1, "Grouping does not auto-check-in others");
+      }
+      pass(`${size}-person booking dashboard + lookup`);
+    }
+
+    // Security: booking ref alone must not expose group / QRs
+    const { res: refOnly, json: refOnlyJ } = await req("/api/booking/lookup", {
+      method: "POST",
+      body: JSON.stringify({ bookingRef: party.bookingRef }),
+    });
+    assert(refOnly.status === 401, "Booking ref alone rejected");
+    assert(!("attendees" in refOnlyJ) && !("qr" in refOnlyJ), "Ref-only response has no tickets");
+    pass("Booking ref alone does not expose group");
+
+    const { res: badPair } = await req("/api/booking/lookup", {
+      method: "POST",
+      body: JSON.stringify({
+        bookingRef: party.bookingRef,
+        accessToken: "x".repeat(32),
+      }),
+    });
+    assert(badPair.status === 401, "Wrong access token rejected");
+    pass("Wrong booking access token rejected");
+
+    // Existing party still loads after bookingRef migration fields
+    const { res: existingDash, json: existingJ } = await req("/api/manage/view", {
+      method: "POST",
+      body: JSON.stringify({ managerToken: party.managerToken }),
+    });
+    assert(existingDash.ok, "Existing 5-person party dashboard loads");
+    assert(existingJ.bookingRef === party.bookingRef, "Existing party bookingRef stable");
+    assert(existingJ.totalAttendees === 5, "Existing party membership preserved");
+    pass("Existing groups keep attendees + bookingRef");
+
+    // Ticket view exposes booking metadata but not other guests
+    const sample = partyTokens[0];
+    const { res: tvRes, json: tv } = await req("/api/ticket/view", {
+      method: "POST",
+      body: JSON.stringify({ ticket: sample.ticketToken }),
+    });
+    assert(tvRes.ok, "Ticket view ok");
+    assert(tv.bookingRef === party.bookingRef, "Ticket view shows bookingRef");
+    assert(tv.partySize === 5, "Ticket view shows party size");
+    assert(tv.ticketNumber === sample.ticketNumber, "Ticket view shows ticketNumber");
+    assert(!("attendees" in tv), "Single ticket view has no group list");
+    pass("Primary ticket page stays single-attendee with group hint");
+  }
 
   await req("/api/organizer/voting", {
     method: "PATCH",

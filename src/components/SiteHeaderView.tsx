@@ -29,6 +29,9 @@ export function SiteHeaderView({
           <Link className={link} href="/register">
             Register
           </Link>
+          <Link className={link} href="/find">
+            Find tickets
+          </Link>
           <Link className={link} href="/competitions">
             Talent Show
           </Link>

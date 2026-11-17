@@ -7,6 +7,7 @@ import {
   generateVotingCredential,
   hashVotingCredential,
 } from "@/lib/crypto";
+import { formatTicketNumber, nextBookingRef } from "@/lib/booking-ref";
 import { clientIp, rateLimit, rateLimitConsume } from "@/lib/rate-limit";
 import { writeAudit } from "@/lib/audit";
 import { TicketStatus } from "@prisma/client";
@@ -132,11 +133,12 @@ export async function POST(request: Request) {
     const managerToken = generateOpaqueToken(32);
 
     let created: {
-      party: { id: string; managerName: string };
+      party: { id: string; managerName: string; bookingRef: string };
       attendeeRows: {
         id: string;
         fullName: string;
         status: TicketStatus;
+        ticketNumber: string;
         ticketToken: string | null;
         votingCredential: string | null;
       }[];
@@ -160,6 +162,8 @@ export async function POST(request: Request) {
           );
         }
 
+        const bookingRef = await nextBookingRef(tx);
+
         const party = await tx.registrationParty.create({
           data: {
             managerName,
@@ -167,6 +171,7 @@ export async function POST(request: Request) {
             contactEmail: parsed.data.email || null,
             notes: parsed.data.notes || null,
             managerToken,
+            bookingRef,
           },
         });
 
@@ -174,6 +179,7 @@ export async function POST(request: Request) {
           id: string;
           fullName: string;
           status: TicketStatus;
+          ticketNumber: string;
           ticketToken: string | null;
           votingCredential: string | null;
         }[] = [];
@@ -181,6 +187,7 @@ export async function POST(request: Request) {
         for (let i = 0; i < attendeeNames.length; i++) {
           const fullName = attendeeNames[i];
           const ticketToken = generateOpaqueToken(32);
+          const ticketNumber = formatTicketNumber(bookingRef, i + 1);
           const votingCredential = generateVotingCredential();
           const votingCredentialHash = await hashVotingCredential(votingCredential);
           const copyContact =
@@ -194,6 +201,7 @@ export async function POST(request: Request) {
               email: copyContact ? parsed.data.email || null : null,
               notes: null,
               ticketToken,
+              ticketNumber,
               votingCredentialHash,
               votingCredentialPlain:
                 status === TicketStatus.ISSUED ? votingCredential : null,
@@ -208,6 +216,7 @@ export async function POST(request: Request) {
             id: attendee.id,
             fullName: attendee.fullName,
             status: attendee.status,
+            ticketNumber: attendee.ticketNumber,
             ticketToken: status === TicketStatus.ISSUED ? ticketToken : null,
             votingCredential: status === TicketStatus.ISSUED ? votingCredential : null,
           });
@@ -233,24 +242,28 @@ export async function POST(request: Request) {
     });
 
     const primary = created.attendeeRows[0];
+    const count = created.attendeeRows.length;
+    const bookingRef = created.party.bookingRef;
 
     return NextResponse.json({
       partyId: created.party.id,
+      bookingRef,
       managerName: created.party.managerName,
       managerToken: status === TicketStatus.ISSUED ? managerToken : null,
       status,
       /** Solo / legacy clients — first attendee */
       attendeeId: primary?.id ?? null,
       fullName: primary?.fullName ?? managerName,
+      ticketNumber: primary?.ticketNumber ?? null,
       ticketToken: primary?.ticketToken ?? null,
       votingCredential: primary?.votingCredential ?? null,
       attendees: created.attendeeRows,
       message:
         status === TicketStatus.PENDING
-          ? "Registration received. Tickets will be issued after approval."
-          : created.attendeeRows.length > 1
-            ? "Registration complete. Save the private management link and each entry ticket."
-            : "Registration complete. Save your ticket and private guest code.",
+          ? `Registration received for ${count} attendee${count === 1 ? "" : "s"}. Booking reference ${bookingRef}. Tickets will be issued after approval.`
+          : count > 1
+            ? `Registered ${count} attendees successfully. Booking reference ${bookingRef}. Save your private booking link to manage every ticket.`
+            : `Registration complete. Booking reference ${bookingRef}. Save your ticket and private booking link.`,
     });
   } catch (err) {
     console.error("register failed", err);

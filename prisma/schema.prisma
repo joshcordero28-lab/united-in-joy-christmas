@@ -101,6 +101,8 @@ model RegistrationParty {
   notes         String?
   /// Opaque private credential for the management page (never a ticket QR).
   managerToken  String   @unique
+  /// Human-readable booking reference (e.g. UIJ2026-00042). Not a secret alone.
+  bookingRef    String   @unique
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -117,6 +119,8 @@ model Attendee {
   email                String?
   notes                String?
   ticketToken          String       @unique
+  /// Human-readable ticket number (e.g. UIJ2026-00042-01). Survives QR rotation.
+  ticketNumber         String       @unique
   votingCredentialHash String
   /// Plain voting code so ticket QR/links can embed it for Audience Choice autofill.
   /// Only issued when the ticket is created/reissued; never logged.

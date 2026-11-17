@@ -9,12 +9,14 @@ type AttendeeResult = {
   id: string;
   fullName: string;
   status: string;
+  ticketNumber?: string;
   ticketToken: string | null;
   votingCredential: string | null;
 };
 
 type RegisterResult = {
   partyId: string;
+  bookingRef?: string;
   managerName: string;
   managerToken: string | null;
   status: string;
@@ -317,27 +319,47 @@ export default function RegisterPage() {
             </h2>
             <p className="text-[var(--ink-soft)]">{result.message}</p>
 
+            {result.bookingRef && (
+              <div className="rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-4">
+                <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-[var(--red)]">
+                  Booking reference
+                </p>
+                <p className="mt-1 font-mono text-2xl font-extrabold tracking-wide">
+                  {result.bookingRef}
+                </p>
+                <p className="mt-2 text-xs text-[var(--ink-soft)]">
+                  Save this reference. With your private booking link you can reopen every
+                  ticket later.
+                </p>
+              </div>
+            )}
+
             {result.managerToken && (
               <>
-                <p className="rounded-xl border border-[var(--gold)] bg-[var(--cream-deep)] p-3 text-sm">
-                  <span className="font-extrabold text-[var(--red)]">Private management page</span>
+                <p className="rounded-xl border border-[var(--gold)]/40 bg-white/70 p-3 text-sm">
+                  <span className="font-extrabold text-[var(--red)]">
+                    View all tickets (private booking link)
+                  </span>
                   <span className="mt-1 block text-xs font-normal text-[var(--ink-soft)]">
-                    Keep this link private. It opens every ticket for this registration. It is
-                    not a door ticket — each person still uses their own QR at check-in.
+                    Keep this link private. It opens the group ticket dashboard for booking{" "}
+                    {result.bookingRef || "this registration"}. It is not a door ticket —
+                    each person still uses their own QR at check-in.
                   </span>
                 </p>
                 <Link
-                  className="btn btn-secondary w-full"
+                  className="btn btn-primary w-full"
                   href={`/manage#${encodeURIComponent(result.managerToken)}`}
                 >
-                  Open management page
+                  {result.attendees.length > 1 ? "View all tickets" : "Open booking dashboard"}
                 </Link>
               </>
             )}
 
             {result.attendees?.some((a) => a.ticketToken) && (
               <div className="space-y-3">
-                <p className="text-sm font-extrabold text-[var(--red)]">Entry tickets</p>
+                <p className="text-sm font-extrabold text-[var(--red)]">
+                  {result.attendees.length > 1 ? "All entry tickets" : "Entry ticket"}
+                </p>
                 {result.attendees.map((a) =>
                   a.ticketToken ? (
                     <div
@@ -345,6 +367,11 @@ export default function RegisterPage() {
                       className="rounded-xl border border-[var(--red)]/10 bg-white/70 p-3 text-sm"
                     >
                       <p className="font-semibold">{a.fullName}</p>
+                      {a.ticketNumber && (
+                        <p className="mt-0.5 font-mono text-xs font-semibold text-[var(--red)]">
+                          {a.ticketNumber}
+                        </p>
+                      )}
                       <p className="mt-1 text-xs text-[var(--ink-soft)]">
                         Private guest code:{" "}
                         <strong className="font-mono tracking-wider text-[var(--red)]">

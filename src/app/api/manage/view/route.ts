@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { getEventConfig } from "@/lib/event";
-import { getPublicVotingGate } from "@/lib/voting-public";
-import { summarizePartyEntitlements } from "@/lib/vote-entitlements";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
+import { buildPartyDashboard } from "@/lib/party-dashboard";
 
 const schema = z.object({
   managerToken: z.string().min(16).max(200),
@@ -26,92 +24,24 @@ export async function POST(request: Request) {
 
     const party = await prisma.registrationParty.findUnique({
       where: { managerToken: parsed.data.managerToken },
-      include: {
-        attendees: {
-          orderBy: [{ fullName: "asc" }, { id: "asc" }],
-          select: {
-            id: true,
-            fullName: true,
-            status: true,
-            ticketToken: true,
-            votingCredentialPlain: true,
-            checkedInAt: true,
-            issuedAt: true,
-          },
-        },
-      },
+      select: { id: true },
     });
 
     if (!party) {
       return NextResponse.json({ error: "Invalid management link." }, { status: 401 });
     }
 
-    const gate = await getPublicVotingGate();
-    const event = await getEventConfig();
-
-    // Soft-removed attendees stay in history server-side but are hidden from the
-    // active management ticket list (party + manager access preserved).
-    const attendees = party.attendees
-      .filter((a) => a.status !== "REMOVED")
-      .map((a) => ({
-        id: a.id,
-        fullName: a.fullName,
-        status: a.status,
-        checkedIn: Boolean(a.checkedInAt),
-        ticketToken: a.status === "ISSUED" ? a.ticketToken : null,
-        /// So ticket links/QR embed Audience Choice autofill for this party.
-        votingCredential:
-          a.status === "ISSUED" ? a.votingCredentialPlain : null,
-      }));
-
-    const payload: Record<string, unknown> = {
-      partyId: party.id,
-      managerName: party.managerName,
-      attendees,
-    };
-
-    // Voting balance only after organizer reveals — never before.
-    if (gate.visible) {
-      const summary = await summarizePartyEntitlements(
-        party.id,
-        event.votingEnabledAfterCheckIn,
-      );
-      payload.voting = {
-        open: gate.open,
-        resultsPublished: gate.resultsPublished,
-        eligible: summary.eligible,
-        used: summary.used,
-        remaining: summary.remaining,
-        remainingAttendees: summary.remainingAttendees.map((a) => ({
-          id: a.id,
-          fullName: a.fullName,
-        })),
-        usedVotes: summary.usedVotes.map((v) => ({
-          attendeeId: v.attendeeId,
-          fullName: v.fullName,
-          groupId: v.groupId,
-          groupName: v.groupName,
-          castBy: v.castBy,
-        })),
-      };
-
-      if (gate.open || gate.resultsPublished) {
-        const groups = await prisma.talentGroup.findMany({
-          where: { status: "APPROVED" },
-          orderBy: [{ performanceOrder: "asc" }, { groupName: "asc" }],
-          select: {
-            id: true,
-            groupName: true,
-            performanceTitle: true,
-            talentType: true,
-            performanceOrder: true,
-          },
-        });
-        payload.groups = groups;
-      }
+    const dashboard = await buildPartyDashboard(party.id);
+    if (!dashboard) {
+      return NextResponse.json({ error: "Invalid management link." }, { status: 401 });
     }
 
-    return NextResponse.json(payload);
+    // Keep managerToken out of JSON when already proven via request body —
+    // clients already hold it from the manage URL. Still return manageLink.
+    const { managerToken: _mt, ...safe } = dashboard;
+    void _mt;
+
+    return NextResponse.json(safe);
   } catch (err) {
     console.error("manage view failed", err);
     return NextResponse.json({ error: "Could not load registration." }, { status: 500 });
