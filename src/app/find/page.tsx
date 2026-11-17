@@ -260,10 +260,14 @@ export default function FindTicketsPage() {
               <ManageMyTicketsLink
                 className="btn btn-primary w-full"
                 hrefOverride="/manage"
-                label="Manage My Tickets"
+                label="My Tickets"
               >
-                Manage My Tickets
+                My Tickets
               </ManageMyTicketsLink>
+              <p className="text-xs text-[var(--ink-soft)]">
+                Opens every QR in this group and controlled group voting when Audience
+                Choice is open.
+              </p>
             </div>
             <ul className="space-y-4">
               {booking.attendees.map((a) => {
