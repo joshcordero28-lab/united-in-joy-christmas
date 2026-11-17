@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getEventConfig } from "@/lib/event";
 import {
+  isBookingRefInput,
+  isTicketNumberInput,
   normalizeBookingRef,
   normalizeTicketNumber,
 } from "@/lib/booking-ref";
@@ -17,25 +19,23 @@ import {
 import { fingerprintToken } from "@/lib/crypto";
 
 const schema = z.object({
-  /** Path A: booking reference (requires accessToken / managerToken). */
-  bookingRef: z.string().min(3).max(40).optional(),
-  /** Booking access token from the original private link (managerToken). */
-  accessToken: z.string().min(16).max(200).optional(),
-  /** Alias accepted for accessToken. */
-  managerToken: z.string().min(16).max(200).optional(),
   /**
-   * Human ticket number (e.g. UIJ2026-00042-01). Sequential / guessable —
-   * NEVER sufficient alone. Requires booking accessToken for the same party.
+   * Primary guest path: opaque private guest code, ticket link, or manage link.
+   * One authorized credential is enough — no booking reference required.
    */
+  guestCode: z.string().min(8).max(500).optional(),
+  /** @deprecated Prefer guestCode — still accepted for older clients. */
+  bookingRef: z.string().min(3).max(40).optional(),
+  accessToken: z.string().min(16).max(200).optional(),
+  managerToken: z.string().min(16).max(200).optional(),
   ticketNumber: z.string().min(8).max(40).optional(),
-  /** Opaque ticket token / ticket link (high entropy — bearer credential). */
   ticket: z.string().min(8).max(500).optional(),
 });
 
-const GENERIC_BOOKING_ERROR = "Invalid booking reference or access code.";
+const GENERIC_CODE_ERROR = "Invalid private guest code.";
 const GENERIC_TICKET_ERROR = "Ticket not found.";
-const TICKET_NUMBER_NEEDS_ACCESS =
-  "A ticket number alone cannot open a ticket. Paste your private ticket link, or enter the ticket number with your booking access code.";
+const NOT_A_PRIVATE_CODE =
+  "That looks like a public reference number, not a private guest code. Paste the private guest code or ticket link you received when you registered.";
 
 type AttendeeTicketRow = {
   id: string;
@@ -49,12 +49,14 @@ type AttendeeTicketRow = {
 };
 
 /**
- * Simplified ticket / booking lookup.
- * - Booking ref alone never returns group details or QRs.
- * - Booking ref + access token → full group dashboard.
- * - Ticket number alone never returns ticket secrets (numbers are guessable).
- * - Ticket number + booking access token → that attendee only.
- * - Opaque ticket token / link → that attendee only (bearer secret).
+ * Ticket / booking lookup for guests.
+ *
+ * Authorized credentials (any one is enough):
+ * - Opaque individual ticket token / ticket link → that attendee only
+ * - Opaque group private guest code (managerToken) / manage link → full party
+ *
+ * Booking refs and ticket numbers are NOT private codes and never unlock alone.
+ * Legacy: booking ref + managerToken still works for organizer-assisted flows.
  */
 export async function POST(request: Request) {
   try {
@@ -73,21 +75,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid lookup request." }, { status: 400 });
     }
 
+    const guestCodeRaw = (parsed.data.guestCode || "").trim();
     const accessToken = extractManagerToken(
       parsed.data.accessToken || parsed.data.managerToken || "",
     );
     const bookingRefRaw = parsed.data.bookingRef?.trim() || "";
     const ticketNumberRaw = parsed.data.ticketNumber?.trim() || "";
-    const ticketRaw = parsed.data.ticket?.trim() || "";
+    const ticketRaw = (parsed.data.ticket || "").trim();
 
-    // --- Path A: booking ref + access token (full group) ---
+    // --- Primary: single private guest code / link ---
+    if (guestCodeRaw) {
+      if (isBookingRefInput(guestCodeRaw) || isTicketNumberInput(guestCodeRaw)) {
+        return NextResponse.json({ error: NOT_A_PRIVATE_CODE }, { status: 401 });
+      }
+
+      const asTicket = extractTicketToken(guestCodeRaw);
+      if (asTicket.length >= 16) {
+        const attendee = await findAttendeeByTicketToken(asTicket);
+        if (attendee) {
+          return NextResponse.json(await singleTicketPayload(attendee));
+        }
+      }
+
+      const asManager = extractManagerToken(guestCodeRaw);
+      if (asManager.length >= 16) {
+        const partyDash = await partyDashboardForManagerToken(asManager);
+        if (partyDash) return NextResponse.json(partyDash);
+      }
+
+      return NextResponse.json({ error: GENERIC_CODE_ERROR }, { status: 401 });
+    }
+
+    // --- Legacy Path A: booking ref + access token (full group) ---
     if (bookingRefRaw) {
       if (!accessToken || accessToken.length < 16) {
         return NextResponse.json(
           {
-            error: GENERIC_BOOKING_ERROR,
+            error: GENERIC_CODE_ERROR,
             needsAccess: true,
-            hint: "Enter both your booking reference and the private access code from your booking link.",
+            hint: "Use your private guest code alone — a booking reference is not required.",
           },
           { status: 401 },
         );
@@ -95,7 +121,7 @@ export async function POST(request: Request) {
 
       const bookingRef = normalizeBookingRef(bookingRefRaw);
       if (!bookingRef) {
-        return NextResponse.json({ error: GENERIC_BOOKING_ERROR }, { status: 401 });
+        return NextResponse.json({ error: GENERIC_CODE_ERROR }, { status: 401 });
       }
 
       const party = await prisma.registrationParty.findFirst({
@@ -104,44 +130,28 @@ export async function POST(request: Request) {
       });
 
       if (!party) {
-        return NextResponse.json({ error: GENERIC_BOOKING_ERROR }, { status: 401 });
+        return NextResponse.json({ error: GENERIC_CODE_ERROR }, { status: 401 });
       }
 
-      const dashboard = await buildPartyDashboard(party.id);
-      if (!dashboard) {
-        return NextResponse.json({ error: GENERIC_BOOKING_ERROR }, { status: 401 });
-      }
-
-      const { managerToken: _mt, ...safe } = dashboard;
-      void _mt;
-
-      return NextResponse.json({
-        mode: "booking",
-        ...safe,
-      });
+      return NextResponse.json(await partyDashboardForId(party.id));
     }
 
-    // --- Path B: human ticket number (requires booking access token) ---
+    // --- Legacy Path B: human ticket number + manager access ---
     if (ticketNumberRaw) {
       const ticketNumber = normalizeTicketNumber(ticketNumberRaw);
-      if (!ticketNumber) {
-        // Do not confirm format vs existence differently from auth failures.
+      if (!ticketNumber || !accessToken || accessToken.length < 16) {
         return NextResponse.json(
-          { error: TICKET_NUMBER_NEEDS_ACCESS, needsAccess: true },
-          { status: 401 },
-        );
-      }
-
-      if (!accessToken || accessToken.length < 16) {
-        return NextResponse.json(
-          { error: TICKET_NUMBER_NEEDS_ACCESS, needsAccess: true },
+          {
+            error: NOT_A_PRIVATE_CODE,
+            needsAccess: true,
+          },
           { status: 401 },
         );
       }
 
       const party = await prisma.registrationParty.findFirst({
         where: { managerToken: accessToken },
-        select: { id: true, bookingRef: true },
+        select: { id: true },
       });
       if (!party) {
         return NextResponse.json({ error: GENERIC_TICKET_ERROR }, { status: 401 });
@@ -153,70 +163,51 @@ export async function POST(request: Request) {
           registrationPartyId: party.id,
           status: { not: "REMOVED" },
         },
-        select: {
-          id: true,
-          fullName: true,
-          status: true,
-          ticketNumber: true,
-          ticketToken: true,
-          votingCredentialPlain: true,
-          checkedInAt: true,
-          registrationParty: { select: { bookingRef: true } },
-        },
+        select: attendeeSelect,
       });
 
       if (!attendee) {
-        // Uniform failure — wrong number on a valid booking, or cross-booking guess.
         return NextResponse.json({ error: GENERIC_TICKET_ERROR }, { status: 401 });
       }
 
       return NextResponse.json(await singleTicketPayload(attendee));
     }
 
-    // --- Path C: opaque ticket token / link (bearer secret) ---
+    // --- Path C: opaque ticket token / link ---
     if (ticketRaw) {
+      if (isBookingRefInput(ticketRaw) || isTicketNumberInput(ticketRaw)) {
+        return NextResponse.json({ error: NOT_A_PRIVATE_CODE }, { status: 401 });
+      }
       const token = extractTicketToken(ticketRaw);
       if (token.length < 16) {
         return NextResponse.json({ error: GENERIC_TICKET_ERROR }, { status: 404 });
       }
 
-      const attendee = await prisma.attendee.findUnique({
-        where: { ticketToken: token },
-        select: {
-          id: true,
-          fullName: true,
-          status: true,
-          ticketNumber: true,
-          ticketToken: true,
-          votingCredentialPlain: true,
-          checkedInAt: true,
-          registrationParty: { select: { bookingRef: true } },
-        },
-      });
-
-      if (!attendee || attendee.status === "REMOVED") {
+      const attendee = await findAttendeeByTicketToken(token);
+      if (!attendee) {
+        // Maybe they pasted a group private guest code into the ticket field.
+        const asManager = extractManagerToken(ticketRaw);
+        if (asManager.length >= 16) {
+          const partyDash = await partyDashboardForManagerToken(asManager);
+          if (partyDash) return NextResponse.json(partyDash);
+        }
         return NextResponse.json({ error: GENERIC_TICKET_ERROR }, { status: 404 });
       }
 
       return NextResponse.json(await singleTicketPayload(attendee));
     }
 
-    // Access token alone without booking ref / ticket — do not unlock anything.
-    if (accessToken) {
-      return NextResponse.json(
-        {
-          error: GENERIC_BOOKING_ERROR,
-          needsAccess: true,
-          hint: "Enter your booking reference with the access code, or paste a private ticket link.",
-        },
-        { status: 401 },
-      );
+    // --- Manager / private guest code alone (group) ---
+    if (accessToken && accessToken.length >= 16) {
+      const partyDash = await partyDashboardForManagerToken(accessToken);
+      if (partyDash) return NextResponse.json(partyDash);
+      return NextResponse.json({ error: GENERIC_CODE_ERROR }, { status: 401 });
     }
 
     return NextResponse.json(
       {
         error:
-          "Provide a booking reference with access code, a ticket link, or a ticket number with your booking access code.",
+          "Enter your private guest code or paste your ticket / booking link.",
       },
       { status: 400 },
     );
@@ -224,6 +215,46 @@ export async function POST(request: Request) {
     console.error("booking lookup failed", err);
     return NextResponse.json({ error: "Lookup failed." }, { status: 500 });
   }
+}
+
+const attendeeSelect = {
+  id: true,
+  fullName: true,
+  status: true,
+  ticketNumber: true,
+  ticketToken: true,
+  votingCredentialPlain: true,
+  checkedInAt: true,
+  registrationParty: { select: { bookingRef: true } },
+} as const;
+
+async function findAttendeeByTicketToken(token: string) {
+  const attendee = await prisma.attendee.findUnique({
+    where: { ticketToken: token },
+    select: attendeeSelect,
+  });
+  if (!attendee || attendee.status === "REMOVED") return null;
+  return attendee;
+}
+
+async function partyDashboardForManagerToken(managerToken: string) {
+  const party = await prisma.registrationParty.findFirst({
+    where: { managerToken },
+    select: { id: true },
+  });
+  if (!party) return null;
+  return partyDashboardForId(party.id);
+}
+
+async function partyDashboardForId(partyId: string) {
+  const dashboard = await buildPartyDashboard(partyId);
+  if (!dashboard) return null;
+  const { managerToken: _mt, ...safe } = dashboard;
+  void _mt;
+  return {
+    mode: "booking" as const,
+    ...safe,
+  };
 }
 
 async function singleTicketPayload(attendee: AttendeeTicketRow) {

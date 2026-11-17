@@ -249,24 +249,25 @@ export function ManageClient() {
           <form onSubmit={onPasteToken} className="panel mt-8 space-y-4 p-5 print:hidden">
             <div>
               <label className="label" htmlFor="managerToken">
-                Private booking link or access code
+                Private Guest Code
               </label>
               <textarea
                 id="managerToken"
                 className="field min-h-24 font-mono text-sm"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
+                placeholder="Paste your private guest code or booking link"
                 required
               />
             </div>
             {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" type="submit" disabled={loading}>
-              {loading ? "Opening…" : "Open booking"}
+              {loading ? "Opening…" : "View My QR Tickets"}
             </button>
             <p className="text-center text-sm text-[var(--ink-soft)]">
-              Have a booking reference?{" "}
+              Looking up a single ticket?{" "}
               <Link href="/find" className="font-semibold text-[var(--red)] underline">
-                Find tickets
+                Find My Ticket
               </Link>
             </p>
           </form>
@@ -474,26 +475,35 @@ export function ManageClient() {
                     <span className="ticket-notch-left" aria-hidden />
                     <span className="ticket-notch-right" aria-hidden />
                     <div className="flex flex-wrap justify-center gap-2">
+                      {a.link && a.ticketToken && (
+                        <Link
+                          className="btn btn-primary !min-h-10 !px-4 !text-sm"
+                          href={
+                            a.votingCredential
+                              ? `/ticket#${encodeURIComponent(a.ticketToken)}~${encodeURIComponent(a.votingCredential)}`
+                              : `/ticket#${encodeURIComponent(a.ticketToken)}`
+                          }
+                        >
+                          View QR Code
+                        </Link>
+                      )}
+                      {a.qr && (
+                        <a
+                          className="btn btn-secondary !min-h-10 !px-4 !text-sm"
+                          href={a.qr}
+                          download={`united-in-joy-${a.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`}
+                        >
+                          Save QR Code
+                        </a>
+                      )}
                       {a.link && (
-                        <>
-                          <Link
-                            className="btn btn-primary !min-h-10 !px-4 !text-sm"
-                            href={
-                              a.votingCredential
-                                ? `/ticket#${encodeURIComponent(a.ticketToken!)}~${encodeURIComponent(a.votingCredential)}`
-                                : `/ticket#${encodeURIComponent(a.ticketToken!)}`
-                            }
-                          >
-                            Open alone
-                          </Link>
-                          <button
-                            type="button"
-                            className="btn btn-secondary !min-h-10 !px-4 !text-sm"
-                            onClick={() => copyText(`ticket-${a.id}`, a.link!)}
-                          >
-                            {copied === `ticket-${a.id}` ? "Copied!" : "Copy ticket link"}
-                          </button>
-                        </>
+                        <button
+                          type="button"
+                          className="btn btn-secondary !min-h-10 !px-4 !text-sm"
+                          onClick={() => copyText(`ticket-${a.id}`, a.link!)}
+                        >
+                          {copied === `ticket-${a.id}` ? "Copied!" : "Copy ticket link"}
+                        </button>
                       )}
                       <button
                         type="button"

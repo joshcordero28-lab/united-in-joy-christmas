@@ -108,10 +108,11 @@ async function main() {
       !/\b(King|Queen)\b|Audience Choice|Vote for Your Favorite|ballot/i.test(html),
       "Home must not mention voting/King/Queen",
     );
-    assert(/Find My Tickets/i.test(html), "Home must show Find My Tickets CTA");
-    assert(/Register for a ticket/i.test(html), "Home must keep Register CTA");
+    assert(/Already Registered\? Find My Ticket/i.test(html), "Home must show Find My Ticket CTA");
+    assert(/Register for the Event/i.test(html), "Home must keep Register CTA");
+    assert(/Manage My Tickets/i.test(html), "Home must keep Manage My Tickets for groups");
     pass("Home page loads without public voting copy");
-    pass("Home shows Find My Tickets near Register");
+    pass("Home shows Find My Ticket near Register");
   }
 
   const { res: voteHidden } = await req("/api/vote");
@@ -906,6 +907,17 @@ async function main() {
     assert(refOnly.status === 401, "Booking ref alone rejected");
     assert(!("attendees" in refOnlyJ) && !("qr" in refOnlyJ), "Ref-only response has no tickets");
     pass("Booking ref alone does not expose group");
+
+    const { res: guestCodeRes, json: guestCodeJ } = await req("/api/booking/lookup", {
+      method: "POST",
+      body: JSON.stringify({ guestCode: party.managerToken }),
+    });
+    assert(guestCodeRes.ok && guestCodeJ.mode === "booking", "Private guest code alone opens group");
+    assert(
+      Array.isArray(guestCodeJ.attendees) && (guestCodeJ.attendees as unknown[]).length === 5,
+      "Guest code returns all authorized tickets",
+    );
+    pass("Private guest code alone retrieves group tickets");
 
     const { res: badPair } = await req("/api/booking/lookup", {
       method: "POST",
