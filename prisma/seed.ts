@@ -93,7 +93,7 @@ async function main() {
       sortOrder: 1,
     },
     {
-      name: "Carol Karaoke",
+      name: "Carol Worship",
       description: "Solo vocal performance of a Christmas carol.",
       type: CompetitionType.INDIVIDUAL,
       maxEntries: 30,
@@ -118,6 +118,17 @@ async function main() {
       sortOrder: 4,
     },
   ];
+
+  // Rename legacy guest-facing label if present (entries stay linked by competition id).
+  const legacyCarolKaraoke = await prisma.competition.findFirst({
+    where: { name: "Carol Karaoke" },
+  });
+  if (legacyCarolKaraoke) {
+    await prisma.competition.update({
+      where: { id: legacyCarolKaraoke.id },
+      data: { name: "Carol Worship" },
+    });
+  }
 
   for (const c of competitions) {
     const existing = await prisma.competition.findFirst({ where: { name: c.name } });
