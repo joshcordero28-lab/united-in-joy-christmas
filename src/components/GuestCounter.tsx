@@ -75,13 +75,13 @@ export function GuestCounter({ initial }: Props) {
 
   return (
     <div
-      className="animate-rise-delay mt-6 w-full max-w-md rounded-2xl border border-[var(--gold)]/45 bg-[var(--cream)]/95 px-4 py-4 text-[var(--ink)] shadow-[0_12px_32px_rgba(42,24,16,0.18)] sm:px-5"
+      className="panel-on-red animate-rise-delay mt-6 w-full max-w-md px-4 py-4 sm:px-5"
       aria-live="polite"
     >
       <p className="text-sm font-extrabold tracking-wide text-[var(--red)] sm:text-base">
         Join the Celebration!
       </p>
-      <p className="brand-mark mt-1 text-2xl leading-tight text-[var(--red)] sm:text-3xl">
+      <p className="brand-mark mt-1 text-2xl leading-tight text-[var(--red-deep)] sm:text-3xl">
         {count}{" "}
         <span className="text-lg font-semibold text-[var(--ink-soft)] sm:text-xl">
           / {capacity} Guests Registered
@@ -92,7 +92,7 @@ export function GuestCounter({ initial }: Props) {
       </p>
 
       <div
-        className="mt-3 h-3 overflow-hidden rounded-full bg-[var(--cream-deep)] ring-1 ring-[var(--green)]/25"
+        className="mt-3 h-3 overflow-hidden rounded-full bg-[var(--cream-deep)] ring-1 ring-[var(--green)]/30"
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={capacity}
@@ -107,7 +107,7 @@ export function GuestCounter({ initial }: Props) {
 
       <p
         className={`mt-2 text-sm font-extrabold ${
-          full ? "text-[var(--red)]" : "text-[var(--green)]"
+          full ? "text-[var(--red-deep)]" : "text-[var(--green-deep)]"
         }`}
       >
         {full ? "Fully Booked!" : `${remaining} spot${remaining === 1 ? "" : "s"} left`}
