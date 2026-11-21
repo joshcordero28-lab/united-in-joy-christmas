@@ -49,12 +49,13 @@ export default async function HomePage() {
 
       <section className="relative w-full overflow-hidden bg-[var(--cream)]">
         <Image
-          src="/brand/united-in-joy-banner-v3.jpg"
-          alt="United in Joy Christmas 2026 — Win Exciting PRIZES! A gathering of thanksgiving and celebration"
-          width={1350}
-          height={1080}
-          className="mx-auto h-auto w-full max-w-5xl object-cover"
+          src="/brand/united-in-joy-flyer-2026.png"
+          alt="You're Invited! United in Joy Christmas Celebration 2026 — worship, talent show, dinner & fellowship. December 13, 2026 after church service. Max 120 attendees."
+          width={1672}
+          height={941}
+          className="mx-auto h-auto w-full max-w-5xl object-contain"
           priority
+          sizes="(max-width: 1024px) 100vw, 1024px"
         />
       </section>
 
