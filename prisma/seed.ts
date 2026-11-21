@@ -33,7 +33,7 @@ async function main() {
       name: "United in Joy Christmas 2026",
       dateLabel: "December 13, 2026",
       venueLabel: "[VENUE — TBD]",
-      capacity: 200,
+      capacity: 120,
       registrationOpen: true,
       requireApproval: false,
       votingEnabledAfterCheckIn: true,
@@ -42,6 +42,7 @@ async function main() {
     update: {
       name: "United in Joy Christmas 2026",
       dateLabel: "December 13, 2026",
+      capacity: 120,
     },
   });
 

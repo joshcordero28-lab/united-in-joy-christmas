@@ -1,6 +1,10 @@
 import { Prisma, TicketStatus } from "@prisma/client";
 import { prisma } from "./db";
 import {
+  assertRegistrationFitsCapacity,
+  invalidateCapacityCache,
+} from "./capacity";
+import {
   fingerprintToken,
   generateOpaqueToken,
   generateVotingCredential,
@@ -336,6 +340,9 @@ export async function softRemoveAttendee(args: SoftRemoveArgs): Promise<SoftRemo
         flaggedTalentGroupIds,
         partyId: attendee.registrationPartyId,
       };
+    }).then((result) => {
+      if (result.ok) invalidateCapacityCache();
+      return result;
     });
   } catch (e: unknown) {
     const status =
@@ -377,94 +384,109 @@ export type SoftRestoreResult =
  * Does not un-void ballots or clear talent review flags.
  */
 export async function softRestoreAttendee(args: SoftRestoreArgs): Promise<SoftRestoreResult> {
-  return prisma.$transaction(async (tx) => {
-    const attendee = await tx.attendee.findUnique({
-      where: { id: args.attendeeId },
-      include: {
-        audienceVotes: { select: { id: true, voidedAt: true } },
-        groupMemberships: {
-          select: { group: { select: { needsMemberReview: true } } },
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const attendee = await tx.attendee.findUnique({
+        where: { id: args.attendeeId },
+        include: {
+          audienceVotes: { select: { id: true, voidedAt: true } },
+          groupMemberships: {
+            select: { group: { select: { needsMemberReview: true } } },
+          },
         },
-      },
-    });
+      });
 
-    if (!attendee) {
-      return { ok: false as const, status: 404, error: "Attendee not found.", code: "not_found" };
-    }
-    if (attendee.status !== TicketStatus.REMOVED) {
+      if (!attendee) {
+        return { ok: false as const, status: 404, error: "Attendee not found.", code: "not_found" };
+      }
+      if (attendee.status !== TicketStatus.REMOVED) {
+        return {
+          ok: false as const,
+          status: 409,
+          error: "Only soft-removed attendees can be restored.",
+          code: "invalid_status",
+        };
+      }
+
+      // Serialize against concurrent registrations / restores.
+      await tx.$executeRaw`SELECT id FROM "EventConfig" WHERE id = 'default' FOR UPDATE`;
+      await assertRegistrationFitsCapacity(tx, 1);
+
+      const ticketToken = generateOpaqueToken(32);
+      const votingCredential = generateVotingCredential();
+      const votingCredentialHash = await hashVotingCredential(votingCredential);
+
+      const updated = await tx.attendee.updateMany({
+        where: { id: attendee.id, status: TicketStatus.REMOVED },
+        data: {
+          status: TicketStatus.ISSUED,
+          ticketToken,
+          votingCredentialHash,
+          votingCredentialPlain: votingCredential,
+          votingCredentialHint: votingCredential.slice(0, 2),
+          issuedAt: attendee.issuedAt ?? new Date(),
+          removedAt: null,
+          removalReason: null,
+          removedById: null,
+          revokedAt: null,
+        },
+      });
+
+      if (updated.count !== 1) {
+        return {
+          ok: false as const,
+          status: 409,
+          error: "Attendee changed concurrently. Retry restore.",
+          code: "conflict",
+        };
+      }
+
+      const voidedBallotRetained = attendee.audienceVotes.some((v) => v.voidedAt);
+      const talentReviewPending = attendee.groupMemberships.some(
+        (m) => m.group.needsMemberReview,
+      );
+
+      await tx.auditLog.create({
+        data: {
+          actorId: args.actorId,
+          actorLabel: args.actorLabel,
+          action: "attendee.soft_restore",
+          entityType: "Attendee",
+          entityId: attendee.id,
+          detail: [
+            args.reason ? `reason=${args.reason.trim()}` : null,
+            `newTicketRef=${ticketStaffRef(ticketToken)}`,
+            `partyId=${attendee.registrationPartyId}`,
+            voidedBallotRetained ? "voidedBallotRetained" : "noVoidedBallot",
+            talentReviewPending ? "talentReviewStillPending" : null,
+            "noExtraVoteEntitlement",
+          ]
+            .filter(Boolean)
+            .join("; "),
+        },
+      });
+
       return {
-        ok: false as const,
-        status: 409,
-        error: "Only soft-removed attendees can be restored.",
-        code: "invalid_status",
-      };
-    }
-
-    const ticketToken = generateOpaqueToken(32);
-    const votingCredential = generateVotingCredential();
-    const votingCredentialHash = await hashVotingCredential(votingCredential);
-
-    const updated = await tx.attendee.updateMany({
-      where: { id: attendee.id, status: TicketStatus.REMOVED },
-      data: {
-        status: TicketStatus.ISSUED,
+        ok: true as const,
+        attendeeId: attendee.id,
+        fullName: attendee.fullName,
         ticketToken,
-        votingCredentialHash,
-        votingCredentialPlain: votingCredential,
-        votingCredentialHint: votingCredential.slice(0, 2),
-        issuedAt: attendee.issuedAt ?? new Date(),
-        removedAt: null,
-        removalReason: null,
-        removedById: null,
-        revokedAt: null,
-      },
-    });
-
-    if (updated.count !== 1) {
-      return {
-        ok: false as const,
-        status: 409,
-        error: "Attendee changed concurrently. Retry restore.",
-        code: "conflict",
+        votingCredential,
+        ticketRef: ticketStaffRef(ticketToken)!,
+        voidedBallotRetained,
+        talentReviewPending,
       };
-    }
-
-    const voidedBallotRetained = attendee.audienceVotes.some((v) => v.voidedAt);
-    const talentReviewPending = attendee.groupMemberships.some(
-      (m) => m.group.needsMemberReview,
-    );
-
-    await tx.auditLog.create({
-      data: {
-        actorId: args.actorId,
-        actorLabel: args.actorLabel,
-        action: "attendee.soft_restore",
-        entityType: "Attendee",
-        entityId: attendee.id,
-        detail: [
-          args.reason ? `reason=${args.reason.trim()}` : null,
-          `newTicketRef=${ticketStaffRef(ticketToken)}`,
-          `partyId=${attendee.registrationPartyId}`,
-          voidedBallotRetained ? "voidedBallotRetained" : "noVoidedBallot",
-          talentReviewPending ? "talentReviewStillPending" : null,
-          "noExtraVoteEntitlement",
-        ]
-          .filter(Boolean)
-          .join("; "),
-      },
     });
-
-    return {
-      ok: true as const,
-      attendeeId: attendee.id,
-      fullName: attendee.fullName,
-      ticketToken,
-      votingCredential,
-      ticketRef: ticketStaffRef(ticketToken)!,
-      voidedBallotRetained,
-      talentReviewPending,
-    };
-  });
+    if (result.ok) invalidateCapacityCache();
+    return result;
+  } catch (e: unknown) {
+    const status =
+      typeof e === "object" && e && "status" in e ? Number((e as { status: number }).status) : 0;
+    if (status === 403 && e instanceof Error) {
+      return { ok: false, status: 403, error: e.message, code: "capacity" };
+    }
+    throw e;
+  }
 }
 
 /** Active (non-voided) votes only — for tallies and public/private results. */
@@ -820,6 +842,9 @@ export async function permanentDeleteAttendee(
         partyMembersPreserved: partyOthers,
         historySnapshot: true,
       };
+    }).then((result) => {
+      if (result.ok) invalidateCapacityCache();
+      return result;
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
