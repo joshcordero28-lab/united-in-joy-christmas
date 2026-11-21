@@ -146,7 +146,13 @@ export default function TalentShowRegisterPage() {
         <h1 className="brand-mark text-4xl text-[var(--red)] sm:text-5xl">
           Christmas Group Talent Show
         </h1>
-        <p className="mt-2 text-[var(--ink-soft)]">
+        <p className="mt-3 text-[var(--ink-soft)]">
+          Let&apos;s celebrate unity beyond our DGroups! We encourage you to team up with
+          members from different DGroups and create something special together. This is a
+          wonderful opportunity to build new friendships, strengthen fellowship, and
+          celebrate our unity in Christ!
+        </p>
+        <p className="mt-2 text-sm text-[var(--ink-soft)]">
           Only registered event attendees can enter. Groups are up to{" "}
           <strong>{MAX_MEMBERS} people</strong> (existing talent-show limit — the leader
           counts as one). Event check-in is not required to register an act.
