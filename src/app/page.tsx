@@ -22,7 +22,7 @@ export default async function HomePage() {
         <section className="relative z-10 mx-auto flex min-h-[calc(100vh-7rem)] w-full max-w-5xl flex-col justify-center px-4 pb-12 pt-2">
           <OrnamentRow />
           <p className="animate-rise mb-3 text-xs font-extrabold uppercase tracking-[0.22em] text-[var(--gold-soft)] sm:text-sm">
-            Food · Games · Karaoke · Raffle · Fellowship
+            Food · Games · Worship · Raffle · Fellowship
           </p>
           <p className="script-mark animate-rise text-3xl text-[var(--cream)] sm:text-4xl">
             Christmas
