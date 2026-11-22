@@ -38,8 +38,12 @@ export default async function HomePage() {
           <p className="script-mark animate-rise-delay mt-1 text-3xl text-[var(--gold-bright)] sm:text-4xl">
             Christmas 2026
           </p>
-          <p className="animate-rise-delay mt-4 max-w-2xl text-balance text-xl font-extrabold leading-snug tracking-wide text-[var(--gold-bright)] sm:max-w-3xl sm:text-2xl md:text-3xl">
-            United in Worship, Grateful in Heart, Joyful in Christ!
+          <p className="animate-rise-delay mt-4 max-w-2xl text-xl font-extrabold leading-snug tracking-wide text-[var(--gold-bright)] sm:text-2xl md:text-3xl">
+            United in Worship,
+            <br />
+            Grateful in Heart,
+            <br />
+            Joyful in Christ!
           </p>
           <p className="animate-rise-delay mt-3 max-w-xl text-lg text-[var(--cream)]/90 sm:text-xl">
             A gathering of thanksgiving and celebration — get your QR ticket and join
