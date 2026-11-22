@@ -5,12 +5,17 @@ import { Sparkles } from "@/components/Sparkles";
 import { ScriptWatermark } from "@/components/ScriptWatermark";
 import { OrnamentRow } from "@/components/OrnamentRow";
 import { HomeHeroCtas } from "@/components/HomeHeroCtas";
+import { GuestCounter } from "@/components/GuestCounter";
+import { getCapacitySnapshot } from "@/lib/capacity";
 import { getEventConfig } from "@/lib/event";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const event = await getEventConfig();
+  const [event, guests] = await Promise.all([
+    getEventConfig(),
+    getCapacitySnapshot({ bypassCache: true }),
+  ]);
 
   return (
     <div className="page-shell">
@@ -41,6 +46,7 @@ export default async function HomePage() {
             the Christmas Group Talent Show.
           </p>
           <HomeHeroCtas />
+          <GuestCounter initial={guests} />
           <p className="mt-8 text-sm text-[var(--cream)]/70">
             {event.dateLabel} · {event.venueLabel}
           </p>

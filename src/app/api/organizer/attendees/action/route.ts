@@ -10,6 +10,7 @@ import {
 } from "@/lib/crypto";
 import { ticketUrl, qrDataUrl } from "@/lib/tickets";
 import { ticketStaffRef } from "@/lib/attendee-removal";
+import { invalidateCapacityCache } from "@/lib/capacity";
 
 const schema = z.object({
   attendeeId: z.string().min(1),
@@ -177,6 +178,10 @@ export async function POST(request: Request) {
           "noExtraVoteEntitlement",
         ].join("; "),
       });
+    }
+
+    if (action === "revoke") {
+      invalidateCapacityCache();
     }
 
     const link =

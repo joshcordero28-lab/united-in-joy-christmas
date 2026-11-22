@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getStaffSession, requireStaff } from "@/lib/session";
 import { getEventConfig } from "@/lib/event";
 import { writeAudit } from "@/lib/audit";
+import { invalidateCapacityCache } from "@/lib/capacity";
 
 const schema = z.object({
   name: z.string().min(2).max(120).optional(),
@@ -60,6 +61,8 @@ export async function PATCH(request: Request) {
       entityId: "default",
       detail: JSON.stringify(parsed.data),
     });
+
+    invalidateCapacityCache();
 
     return NextResponse.json({ event });
   } catch (err) {

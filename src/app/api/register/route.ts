@@ -15,6 +15,10 @@ import {
 } from "@/lib/idempotency";
 import { clientIp, rateLimit, rateLimitConsume } from "@/lib/rate-limit";
 import { writeAudit } from "@/lib/audit";
+import {
+  assertRegistrationFitsCapacity,
+  invalidateCapacityCache,
+} from "@/lib/capacity";
 import { TicketStatus } from "@prisma/client";
 
 /** Hard cap per registration submission (also enforced in UI). */
@@ -186,19 +190,7 @@ export async function POST(request: Request) {
       created = await prisma.$transaction(async (tx) => {
         // Serialize capacity checks against concurrent registrations.
         await tx.$executeRaw`SELECT id FROM "EventConfig" WHERE id = 'default' FOR UPDATE`;
-        const cfg = await tx.eventConfig.findUnique({ where: { id: "default" } });
-        const capacity = cfg?.capacity ?? event.capacity;
-        const issuedCount = await tx.attendee.count({
-          where: { status: { in: [TicketStatus.ISSUED, TicketStatus.PENDING] } },
-        });
-        if (issuedCount + attendeeNames.length > capacity) {
-          throw Object.assign(
-            new Error(
-              `Not enough capacity for ${attendeeNames.length} attendee(s). ${Math.max(0, capacity - issuedCount)} spot(s) left.`,
-            ),
-            { status: 403 },
-          );
-        }
+        await assertRegistrationFitsCapacity(tx, attendeeNames.length);
 
         const bookingRef = await nextBookingRef(tx);
 
@@ -308,6 +300,8 @@ export async function POST(request: Request) {
     if (idempotencyKey) {
       await saveIdempotentResponse(idempotencyKey, payload);
     }
+
+    invalidateCapacityCache();
 
     return NextResponse.json(payload);
   } catch (err) {
