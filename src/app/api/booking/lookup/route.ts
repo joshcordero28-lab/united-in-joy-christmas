@@ -16,7 +16,7 @@ import {
   qrDataUrl,
   ticketUrl,
 } from "@/lib/tickets";
-import { fingerprintToken } from "@/lib/crypto";
+import { fingerprintToken, verifyVotingCredential } from "@/lib/crypto";
 
 const schema = z.object({
   /**
@@ -30,12 +30,17 @@ const schema = z.object({
   managerToken: z.string().min(16).max(200).optional(),
   ticketNumber: z.string().min(8).max(40).optional(),
   ticket: z.string().min(8).max(500).optional(),
+  /** Second factor for printed ticket numbers (same pairing as talent/vote). */
+  votingCredential: z.string().min(4).max(40).optional(),
 });
 
 const GENERIC_CODE_ERROR = "Invalid private guest code.";
 const GENERIC_TICKET_ERROR = "Ticket not found.";
 const NOT_A_PRIVATE_CODE =
   "That looks like a public reference number, not a private guest code. Paste the private guest code or ticket link you received when you registered.";
+const NEEDS_VOTING_CODE =
+  "Ticket numbers need your voting code from the ticket stub — or paste your Private Guest Code / ticket link instead.";
+const BAD_TICKET_OR_CODE = "Ticket number or voting code is incorrect.";
 
 type AttendeeTicketRow = {
   id: string;
@@ -54,6 +59,7 @@ type AttendeeTicketRow = {
  * Authorized credentials (any one is enough):
  * - Opaque individual ticket token / ticket link → that attendee only
  * - Opaque group private guest code (managerToken) / manage link → full party
+ * - Printed ticket number + voting code → that attendee only (same pairing as talent/vote)
  *
  * Booking refs and ticket numbers are NOT private codes and never unlock alone.
  * Legacy: booking ref + managerToken still works for organizer-assisted flows.
@@ -82,10 +88,23 @@ export async function POST(request: Request) {
     const bookingRefRaw = parsed.data.bookingRef?.trim() || "";
     const ticketNumberRaw = parsed.data.ticketNumber?.trim() || "";
     const ticketRaw = (parsed.data.ticket || "").trim();
+    const voteCode = (parsed.data.votingCredential || "").trim();
 
     // --- Primary: single private guest code / link ---
     if (guestCodeRaw) {
-      if (isBookingRefInput(guestCodeRaw) || isTicketNumberInput(guestCodeRaw)) {
+      // Printed ticket IDs are not opaque secrets — require voting code (or use Path B).
+      if (isTicketNumberInput(guestCodeRaw)) {
+        if (voteCode.length >= 4) {
+          const byVote = await lookupByTicketNumberAndVote(guestCodeRaw, voteCode);
+          if (byVote) return byVote;
+          return NextResponse.json({ error: BAD_TICKET_OR_CODE }, { status: 401 });
+        }
+        return NextResponse.json(
+          { error: NEEDS_VOTING_CODE, code: "needs_voting_code", needsAccess: true },
+          { status: 401 },
+        );
+      }
+      if (isBookingRefInput(guestCodeRaw)) {
         return NextResponse.json({ error: NOT_A_PRIVATE_CODE }, { status: 401 });
       }
 
@@ -136,13 +155,28 @@ export async function POST(request: Request) {
       return NextResponse.json(await partyDashboardForId(party.id));
     }
 
-    // --- Legacy Path B: human ticket number + manager access ---
+    // --- Path B: human ticket number + second factor ---
+    // Prefer voting code (printed stub). Legacy: managerToken still accepted.
     if (ticketNumberRaw) {
       const ticketNumber = normalizeTicketNumber(ticketNumberRaw);
-      if (!ticketNumber || !accessToken || accessToken.length < 16) {
+      if (!ticketNumber) {
+        return NextResponse.json(
+          { error: NOT_A_PRIVATE_CODE, needsAccess: true },
+          { status: 401 },
+        );
+      }
+
+      if (voteCode.length >= 4) {
+        const byVote = await lookupByTicketNumberAndVote(ticketNumber, voteCode);
+        if (byVote) return byVote;
+        return NextResponse.json({ error: BAD_TICKET_OR_CODE }, { status: 401 });
+      }
+
+      if (!accessToken || accessToken.length < 16) {
         return NextResponse.json(
           {
-            error: NOT_A_PRIVATE_CODE,
+            error: NEEDS_VOTING_CODE,
+            code: "needs_voting_code",
             needsAccess: true,
           },
           { status: 401 },
@@ -235,6 +269,28 @@ async function findAttendeeByTicketToken(token: string) {
   });
   if (!attendee || attendee.status === "REMOVED") return null;
   return attendee;
+}
+
+/** Ticket number + voting code → single-ticket payload (never group PII). */
+async function lookupByTicketNumberAndVote(ticketNumberOrRaw: string, voteCode: string) {
+  const ticketNumber = normalizeTicketNumber(ticketNumberOrRaw);
+  if (!ticketNumber) return null;
+
+  const row = await prisma.attendee.findUnique({
+    where: { ticketNumber },
+    select: {
+      ...attendeeSelect,
+      votingCredentialHash: true,
+    },
+  });
+  if (!row || row.status === "REMOVED") return null;
+
+  const ok = await verifyVotingCredential(voteCode, row.votingCredentialHash);
+  if (!ok) return null;
+
+  const { votingCredentialHash: _hash, ...attendee } = row;
+  void _hash;
+  return NextResponse.json(await singleTicketPayload(attendee));
 }
 
 async function partyDashboardForManagerToken(managerToken: string) {
