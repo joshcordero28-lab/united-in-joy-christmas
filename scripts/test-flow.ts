@@ -853,15 +853,33 @@ async function main() {
       assert(fullLookup.ok && fullJ.mode === "booking", `${size}-person booking lookup`);
       assert(fullJ.totalAttendees === size, "Lookup returns full group");
 
-      const first = (g.attendees as { ticketNumber: string; ticketToken: string; fullName: string })[0];
+      const first = (g.attendees as {
+        ticketNumber: string;
+        ticketToken: string;
+        fullName: string;
+        votingCredential: string;
+      })[0];
       // Ticket number alone must NOT unlock QR / bearer secrets (guessable IDs).
       const { res: tnAlone, json: tnAloneJ } = await req("/api/booking/lookup", {
         method: "POST",
         body: JSON.stringify({ ticketNumber: first.ticketNumber }),
       });
       assert(tnAlone.status === 401, "Ticket number alone must be rejected");
+      assert(tnAloneJ.code === "needs_voting_code", "Ticket number alone asks for voting code");
       assert(!("qr" in tnAloneJ) && !("link" in tnAloneJ) && !("votingCredential" in tnAloneJ),
         "Ticket-number-only response must not expose ticket secrets");
+
+      const { res: tnVote, json: tnVoteJ } = await req("/api/booking/lookup", {
+        method: "POST",
+        body: JSON.stringify({
+          ticketNumber: first.ticketNumber,
+          votingCredential: first.votingCredential,
+        }),
+      });
+      assert(tnVote.ok && tnVoteJ.mode === "ticket", "Ticket-number + voting code lookup");
+      assert(tnVoteJ.fullName === first.fullName, "Vote-code lookup returns that attendee");
+      assert(tnVoteJ.qr, "Vote-code lookup returns QR");
+      assert(!("attendees" in tnVoteJ), "Vote-code lookup must not include group attendees");
 
       const { res: oneRes, json: oneJ } = await req("/api/booking/lookup", {
         method: "POST",

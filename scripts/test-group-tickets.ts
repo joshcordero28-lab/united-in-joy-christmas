@@ -146,11 +146,27 @@ async function main() {
       "each group ticket includes QR",
     );
 
-    const { res: tnAlone } = await req("/api/booking/lookup", {
+    const { res: tnAlone, json: tnAloneJ } = await req("/api/booking/lookup", {
       method: "POST",
       body: JSON.stringify({ guestCode: first.ticketNumber }),
     });
     assert(tnAlone.status === 401, "ticket number alone blocked");
+    assert(tnAloneJ.code === "needs_voting_code", "ticket number alone asks for voting code");
+
+    const voteCode = String(
+      (json.attendees as { votingCredential?: string }[])[0]?.votingCredential || "",
+    );
+    assert(voteCode.length >= 4, "registration returns voting credential for lookup test");
+    const { res: tnVote, json: tnVoteJ } = await req("/api/booking/lookup", {
+      method: "POST",
+      body: JSON.stringify({
+        ticketNumber: first.ticketNumber,
+        votingCredential: voteCode,
+      }),
+    });
+    assert(tnVote.ok && tnVoteJ.mode === "ticket", "ticket number + voting code opens ticket");
+    assert(tnVoteJ.qr, "ticket number + voting code returns QR");
+    assert(!("attendees" in tnVoteJ), "ticket number + voting code hides group mates");
 
     // Individual ticket token → that attendee only (no group mates)
     const { res: opaque, json: opaqueJ } = await req("/api/booking/lookup", {

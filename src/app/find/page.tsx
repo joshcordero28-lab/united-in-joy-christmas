@@ -8,6 +8,7 @@ import { CcfMark } from "@/components/CcfMark";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
 import { ManageMyTicketsLink } from "@/components/ManageMyTicketsLink";
 import { SaveQrButton } from "@/components/SaveQrButton";
+import { isTicketNumberInput } from "@/lib/booking-ref";
 import { storeManagerToken } from "@/lib/manage-session";
 
 type TicketResult = {
@@ -76,6 +77,7 @@ function ticketPageHref(link: string | null, votingCredential?: string | null, t
 
 export default function FindTicketsPage() {
   const [guestCode, setGuestCode] = useState("");
+  const [votingCredential, setVotingCredential] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ticket, setTicket] = useState<TicketResult | null>(null);
@@ -83,6 +85,7 @@ export default function FindTicketsPage() {
   const [focusQrId, setFocusQrId] = useState<string | null>(null);
 
   const hasResult = Boolean(ticket || booking);
+  const needsVoteCode = isTicketNumberInput(guestCode);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -93,14 +96,27 @@ export default function FindTicketsPage() {
     setFocusQrId(null);
 
     try {
+      const trimmed = guestCode.trim();
+      const body = needsVoteCode
+        ? {
+            ticketNumber: trimmed,
+            votingCredential: votingCredential.trim(),
+          }
+        : { guestCode: trimmed };
+
       const res = await fetch("/api/booking/lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guestCode: guestCode.trim() }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data.error || "Could not verify that private guest code.");
+        setError(
+          data.error ||
+            (needsVoteCode
+              ? "Could not find that ticket."
+              : "Could not verify that private guest code."),
+        );
         return;
       }
 
@@ -156,20 +172,20 @@ export default function FindTicketsPage() {
         <p className="script-mark text-2xl text-[var(--red)]">Already registered?</p>
         <h1 className="brand-mark text-4xl text-[var(--red)]">Find My Ticket</h1>
         <p className="mt-2 text-[var(--ink-soft)]">
-          Enter the private guest code from registration. One code is enough — no booking
-          reference needed.
+          Use your Private Guest Code or ticket link — or your Ticket ID with the voting
+          code from your stub.
         </p>
 
         {!hasResult ? (
           <form onSubmit={onSubmit} className="panel mt-8 space-y-4 p-5">
             <div>
               <label className="label" htmlFor="guestCode">
-                Private Guest Code
+                Private Guest Code or Ticket ID
               </label>
               <textarea
                 id="guestCode"
                 className="field min-h-28 font-mono text-sm"
-                placeholder="Paste your private guest code, ticket link, or booking link"
+                placeholder="Private guest code, ticket link, or Ticket ID (UIJ2026-#####-NN)"
                 value={guestCode}
                 onChange={(e) => setGuestCode(e.target.value)}
                 required
@@ -177,10 +193,28 @@ export default function FindTicketsPage() {
                 autoFocus
               />
               <p className="mt-2 text-xs text-[var(--ink-soft)]">
-                Use the code or link you received when you registered. Public reference
-                numbers alone will not open a ticket.
+                {needsVoteCode
+                  ? "Ticket IDs need the voting code printed on your ticket stub."
+                  : "Paste the code or link from registration. A Ticket ID alone will not open a ticket."}
               </p>
             </div>
+
+            {needsVoteCode && (
+              <div>
+                <label className="label" htmlFor="votingCredential">
+                  Voting code (required with Ticket ID)
+                </label>
+                <input
+                  id="votingCredential"
+                  className="field font-mono"
+                  value={votingCredential}
+                  onChange={(e) => setVotingCredential(e.target.value.toUpperCase())}
+                  placeholder="From your ticket stub"
+                  autoComplete="one-time-code"
+                  required
+                />
+              </div>
+            )}
 
             {error && <p className="font-semibold text-[var(--red)]">{error}</p>}
             <button className="btn btn-primary w-full" type="submit" disabled={loading}>
