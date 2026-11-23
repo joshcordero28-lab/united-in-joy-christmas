@@ -45,7 +45,9 @@ export async function POST(request: Request) {
     const attendee = await prisma.attendee.findUnique({
       where: { id: parsed.data.attendeeId },
       include: {
-        registrationParty: { select: { bookingRef: true, id: true } },
+        registrationParty: {
+          select: { bookingRef: true, id: true, managerToken: true },
+        },
         audienceVotes: { select: { id: true, voidedAt: true } },
       },
     });
@@ -200,6 +202,10 @@ export async function POST(request: Request) {
       ticketNumber: attendee.ticketNumber,
       bookingRef: attendee.registrationParty.bookingRef,
       ticketToken,
+      /** Same as ticketToken — the individual Private Guest Code for Find My Ticket. */
+      privateGuestCode: ticketToken,
+      /** Group Private Guest Code for the booking (unchanged by resend / replace_qr). */
+      groupPrivateGuestCode: attendee.registrationParty.managerToken,
       votingCredential,
       ticketRef: ticketToken ? ticketStaffRef(ticketToken) : null,
       link,
@@ -209,7 +215,7 @@ export async function POST(request: Request) {
       hasActiveVote,
       message:
         action === "resend"
-          ? "Existing ticket re-sent — same QR and ticket number. No new attendee created."
+          ? "Existing ticket re-sent — same Private Guest Code and QR. No new attendee created."
           : action === "replace_qr"
             ? "QR replaced — previous QR is invalid. Same attendee, check-in, and votes preserved."
             : `Action ${action} complete.`,

@@ -103,6 +103,8 @@ export async function GET(request: Request) {
             contactPhone: true,
             contactEmail: true,
             bookingRef: true,
+            // Organizer-only recovery: group Private Guest Code for Find My Ticket / Manage.
+            managerToken: true,
           },
         },
         audienceVotes: {
@@ -187,6 +189,10 @@ export async function GET(request: Request) {
         const stats = partyStats.get(a.registrationPartyId);
         const activeVote = a.audienceVotes.find((v) => !v.voidedAt);
         const voidedVote = a.audienceVotes.find((v) => v.voidedAt);
+        // Existing codes only — never rotate here. Soft-removed / revoked tickets are
+        // not valid recovery codes (token may already be rotated on remove).
+        const canRevealPrivateCode =
+          isOrganizer && (a.status === "ISSUED" || a.status === "PENDING");
         return {
           id: a.id,
           fullName: a.fullName,
@@ -196,6 +202,12 @@ export async function GET(request: Request) {
           ticketNumber: a.ticketNumber,
           bookingRef: a.registrationParty.bookingRef,
           ticketRef: ticketStaffRef(a.ticketToken),
+          /** Individual Private Guest Code (ticketToken) — Find My Ticket for this guest. Organizer only. */
+          privateGuestCode: canRevealPrivateCode ? a.ticketToken : null,
+          /** Group Private Guest Code (managerToken) — Find My Ticket / Manage for the booking. Organizer only. */
+          groupPrivateGuestCode: isOrganizer
+            ? a.registrationParty.managerToken
+            : null,
           registeredAt: a.registeredAt,
           issuedAt: a.issuedAt,
           checkedInAt: a.checkedInAt,
