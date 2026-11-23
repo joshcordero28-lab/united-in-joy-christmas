@@ -70,6 +70,10 @@ type Attendee = {
   ticketNumber?: string | null;
   bookingRef?: string | null;
   ticketRef?: string | null;
+  /** Individual Private Guest Code (ticketToken) — Find My Ticket for this guest. */
+  privateGuestCode?: string | null;
+  /** Group Private Guest Code (managerToken) — Find My Ticket / Manage for the booking. */
+  groupPrivateGuestCode?: string | null;
   checkedInAt: string | null;
   checkInMethod?: string | null;
   removedAt?: string | null;
@@ -126,6 +130,7 @@ export default function OrganizerPage() {
   >([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const [dupClusters, setDupClusters] = useState<
     {
       key: string;
@@ -205,6 +210,16 @@ export default function OrganizerPage() {
     setAttendees(data.attendees || []);
   }
 
+  async function copyText(label: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      setCopied(null);
+    }
+  }
+
   async function attendeeAction(
     attendeeId: string,
     action: "approve" | "revoke" | "resend" | "replace_qr",
@@ -235,9 +250,12 @@ export default function OrganizerPage() {
       return;
     }
     if (action === "resend") {
+      const code = data.privateGuestCode || data.ticketToken;
       setMessage(
-        data.link
-          ? `Re-sent existing ticket (same QR). Link: ${data.link}`
+        code
+          ? `Re-sent existing ticket (same Private Guest Code / QR). Code: ${code}${
+              data.link ? ` · Link: ${data.link}` : ""
+            }`
           : data.message || "Existing ticket re-sent.",
       );
     } else if (data.votingCredential) {
@@ -733,12 +751,22 @@ export default function OrganizerPage() {
               </a>
             </div>
           </div>
+          <p className="mt-2 text-sm text-[var(--ink-soft)]">
+            Lost-code recovery: search the guest, then copy their{" "}
+            <span className="font-semibold text-[var(--ink)]">Private Guest Code</span>{" "}
+            (individual ticket) or the{" "}
+            <span className="font-semibold text-[var(--ink)]">Group Private Guest Code</span>{" "}
+            for Find My Ticket / Manage. Codes are existing credentials — not regenerated.
+          </p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <input
               className="field"
               placeholder="Search name, booking ref, ticket #, phone, email"
               value={q}
               onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void search();
+              }}
             />
             <button type="button" className="btn btn-secondary" onClick={search}>
               Search
@@ -760,9 +788,10 @@ export default function OrganizerPage() {
             {attendees.map((a) => (
               <div
                 key={a.id}
-                className="flex flex-col gap-2 rounded-xl border border-[var(--red)]/10 p-3 sm:flex-row sm:items-center sm:justify-between"
+                className="rounded-xl border border-[var(--red)]/10 p-3"
               >
-                <div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
                   <p className="font-semibold">{a.fullName}</p>
                   <p className="text-sm text-[var(--ink-soft)]">
                     {a.status}
@@ -792,34 +821,8 @@ export default function OrganizerPage() {
                       ? ` · reason: ${a.removalReason}`
                       : ""}
                   </p>
-                  {a.partyMembers && a.partyMembers.length > 1 && (
-                    <ul className="mt-2 space-y-1 border-t border-[var(--red)]/10 pt-2 text-xs text-[var(--ink-soft)]">
-                      {a.partyMembers.map((m) => (
-                        <li key={m.id} className="flex flex-wrap items-center gap-2">
-                          <span>
-                            {m.fullName}
-                            {m.ticketNumber ? ` · ${m.ticketNumber}` : ""}
-                            {m.checkedInAt
-                              ? ` · checked in${m.checkInMethod ? ` (${m.checkInMethod})` : ""}`
-                              : " · not checked in"}
-                          </span>
-                          {m.id !== a.id &&
-                            m.status === "ISSUED" &&
-                            !m.checkedInAt && (
-                              <button
-                                type="button"
-                                className="btn btn-secondary !min-h-8 !px-2 !text-xs"
-                                onClick={() => manualCheckIn(m)}
-                              >
-                                Check In Manually
-                              </button>
-                            )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex shrink-0 flex-wrap gap-2">
                   {a.status === "PENDING" && (
                     <button
                       type="button"
@@ -911,6 +914,85 @@ export default function OrganizerPage() {
                     </>
                   )}
                 </div>
+                </div>
+                {(a.privateGuestCode || a.groupPrivateGuestCode) && (
+                  <div className="mt-3 w-full space-y-2 rounded-lg border border-[var(--red)]/15 bg-white/70 p-2.5 text-xs">
+                    {a.privateGuestCode && (
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-[var(--ink)]">
+                            Private Guest Code
+                            <span className="ml-1 font-normal text-[var(--ink-soft)]">
+                              (this guest → Find My Ticket)
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-secondary !min-h-7 shrink-0 !px-2 !text-xs"
+                            onClick={() =>
+                              copyText(`ind-${a.id}`, a.privateGuestCode!)
+                            }
+                          >
+                            {copied === `ind-${a.id}` ? "Copied!" : "Copy"}
+                          </button>
+                        </div>
+                        <code className="block w-full overflow-x-auto whitespace-nowrap rounded border border-[var(--red)]/10 bg-[var(--cream)] px-2 py-1.5 font-mono text-[12px] leading-snug text-[var(--ink)]">
+                          {a.privateGuestCode}
+                        </code>
+                      </div>
+                    )}
+                    {a.groupPrivateGuestCode && (
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-semibold text-[var(--ink)]">
+                            Group Private Guest Code
+                            <span className="ml-1 font-normal text-[var(--ink-soft)]">
+                              (booking → Find My Ticket / Manage)
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn-secondary !min-h-7 shrink-0 !px-2 !text-xs"
+                            onClick={() =>
+                              copyText(`grp-${a.id}`, a.groupPrivateGuestCode!)
+                            }
+                          >
+                            {copied === `grp-${a.id}` ? "Copied!" : "Copy"}
+                          </button>
+                        </div>
+                        <code className="block w-full overflow-x-auto whitespace-nowrap rounded border border-[var(--red)]/10 bg-[var(--cream)] px-2 py-1.5 font-mono text-[12px] leading-snug text-[var(--ink)]">
+                          {a.groupPrivateGuestCode}
+                        </code>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {a.partyMembers && a.partyMembers.length > 1 && (
+                  <ul className="mt-2 space-y-1 border-t border-[var(--red)]/10 pt-2 text-xs text-[var(--ink-soft)]">
+                    {a.partyMembers.map((m) => (
+                      <li key={m.id} className="flex flex-wrap items-center gap-2">
+                        <span>
+                          {m.fullName}
+                          {m.ticketNumber ? ` · ${m.ticketNumber}` : ""}
+                          {m.checkedInAt
+                            ? ` · checked in${m.checkInMethod ? ` (${m.checkInMethod})` : ""}`
+                            : " · not checked in"}
+                        </span>
+                        {m.id !== a.id &&
+                          m.status === "ISSUED" &&
+                          !m.checkedInAt && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary !min-h-8 !px-2 !text-xs"
+                              onClick={() => manualCheckIn(m)}
+                            >
+                              Check In Manually
+                            </button>
+                          )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             ))}
           </div>

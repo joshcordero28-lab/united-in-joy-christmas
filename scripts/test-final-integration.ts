@@ -178,16 +178,42 @@ async function main() {
     pass("Private Guest Code retrieves QR without booking reference");
   }
 
-  // Organizer recover private code via resend (masked by default in list)
+  // Organizer sees Private Guest Codes in search list; staff does not
   {
     const list = await req("/api/organizer/attendees?q=" + encodeURIComponent(`Integ Solo ${stamp}`), {
       jar: orgJar,
     });
-    const rows = (list.json.attendees as { id: string; ticketRef?: string; ticketToken?: string }[]) || [];
+    const rows =
+      (list.json.attendees as {
+        id: string;
+        ticketRef?: string;
+        ticketToken?: string;
+        privateGuestCode?: string | null;
+        groupPrivateGuestCode?: string | null;
+      }[]) || [];
     const row = rows.find((r) => r.id === attendeeId);
     assert(row, "organizer can search attendee");
     assert(row.ticketRef, "list shows fingerprint ref");
-    assert(!row.ticketToken || row.ticketToken.length < 20, "list does not expose full private code");
+    assert(row.privateGuestCode === ticketToken, "list reveals individual Private Guest Code");
+    assert(
+      typeof row.groupPrivateGuestCode === "string" && row.groupPrivateGuestCode.length >= 16,
+      "list reveals group Private Guest Code",
+    );
+    assert(!("ticketToken" in row) || !row.ticketToken, "raw ticketToken field stays off the list payload");
+    const staffList = await req(
+      "/api/organizer/attendees?q=" + encodeURIComponent(`Integ Solo ${stamp}`),
+      { jar: staffJar },
+    );
+    const staffRow = (
+      (staffList.json.attendees as {
+        id: string;
+        privateGuestCode?: string | null;
+        groupPrivateGuestCode?: string | null;
+      }[]) || []
+    ).find((r) => r.id === attendeeId);
+    assert(staffRow, "staff can search attendee");
+    assert(!staffRow.privateGuestCode, "staff list hides individual Private Guest Code");
+    assert(!staffRow.groupPrivateGuestCode, "staff list hides group Private Guest Code");
     const resend = await req("/api/organizer/attendees/action", {
       method: "POST",
       jar: orgJar,
@@ -195,13 +221,18 @@ async function main() {
     });
     assert(resend.res.ok, `resend: ${JSON.stringify(resend.json)}`);
     assert(resend.json.ticketToken === ticketToken, "resend recovers same Private Guest Code");
+    assert(resend.json.privateGuestCode === ticketToken, "resend aliases privateGuestCode");
+    assert(
+      resend.json.groupPrivateGuestCode === row.groupPrivateGuestCode,
+      "resend returns same group Private Guest Code",
+    );
     const staffResend = await req("/api/organizer/attendees/action", {
       method: "POST",
       jar: staffJar,
       body: JSON.stringify({ attendeeId, action: "resend" }),
     });
     assert(staffResend.res.status === 403, "staff cannot recover private code via organizer action");
-    pass("Organizer Private Guest Code recovery (resend); staff blocked");
+    pass("Organizer Private Guest Code visible in search; staff blocked");
   }
 
   // Manual check-in then QR duplicate
