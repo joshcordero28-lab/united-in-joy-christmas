@@ -82,7 +82,6 @@ export default function FindTicketsPage() {
   const [error, setError] = useState<string | null>(null);
   const [ticket, setTicket] = useState<TicketResult | null>(null);
   const [booking, setBooking] = useState<BookingResult | null>(null);
-  const [focusQrId, setFocusQrId] = useState<string | null>(null);
 
   const hasResult = Boolean(ticket || booking);
   const needsVoteCode = isTicketNumberInput(guestCode);
@@ -93,7 +92,6 @@ export default function FindTicketsPage() {
     setError(null);
     setTicket(null);
     setBooking(null);
-    setFocusQrId(null);
 
     try {
       const trimmed = guestCode.trim();
@@ -131,9 +129,6 @@ export default function FindTicketsPage() {
             storeManagerToken(hash);
           }
         }
-        if (result.attendees.length === 1 && result.attendees[0]?.qr) {
-          setFocusQrId(result.attendees[0].id);
-        }
       } else {
         const result = data as TicketResult;
         setTicket(result);
@@ -162,7 +157,6 @@ export default function FindTicketsPage() {
     setTicket(null);
     setBooking(null);
     setError(null);
-    setFocusQrId(null);
   }
 
   return (
@@ -292,69 +286,72 @@ export default function FindTicketsPage() {
                 {booking.checkedInCount} checked in · {booking.dateLabel}
               </p>
               <ManageMyTicketsLink
-                className="btn btn-primary w-full"
+                className="btn btn-secondary w-full"
                 hrefOverride="/manage"
                 label="My Tickets"
               >
                 My Tickets
               </ManageMyTicketsLink>
               <p className="text-xs text-[var(--ink-soft)]">
-                Opens every QR in this group and controlled group voting when Audience
-                Choice is open.
+                Full group dashboard and controlled group voting when Audience Choice is
+                open. Every active ticket QR for this booking is shown below.
               </p>
             </div>
             <ul className="space-y-4">
-              {booking.attendees.map((a) => {
-                const showQr = focusQrId === a.id || booking.attendees.length === 1;
-                return (
-                  <li
-                    key={a.id}
-                    className="rounded-xl border border-[var(--red)]/10 bg-white/70 px-4 py-4 text-sm"
-                  >
-                    <p className="font-semibold text-base">{a.fullName}</p>
-                    <p className="text-xs text-[var(--ink-soft)]">
-                      {a.status}
-                      {a.checkedIn ? " · checked in" : ""}
-                    </p>
-                    {showQr && a.qr ? (
-                      <div className="mt-3 text-center">
-                        <div className="mx-auto inline-block rounded-2xl border-2 border-[var(--gold)] bg-white p-3">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={a.qr}
-                            alt={`Entry QR for ${a.fullName}`}
-                            className="h-48 w-48"
-                          />
-                        </div>
-                        <div className="mt-3 space-y-2">
-                          <SaveQrButton
-                            qrDataUrl={a.qr}
-                            className="btn btn-secondary !min-h-10 w-full !text-sm"
-                            fileName={`united-in-joy-${a.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`}
-                          />
-                          {a.link && (
-                            <Link
-                              className="btn btn-primary !min-h-10 w-full !text-sm"
-                              href={ticketPageHref(a.link, a.votingCredential, a.ticketToken)}
-                            >
-                              View QR Code
-                            </Link>
-                          )}
-                        </div>
+              {booking.attendees.map((a) => (
+                <li
+                  key={a.id}
+                  className="ticket-shell animate-rise px-5 pb-5 pt-6 text-center"
+                >
+                  <p className="text-xs font-extrabold uppercase tracking-[0.22em] text-[var(--red)]">
+                    Entry ticket
+                  </p>
+                  <p className="mt-3 text-xl font-extrabold">{a.fullName}</p>
+                  <p className="mt-1 font-mono text-sm font-semibold tracking-wide text-[var(--red)]">
+                    {a.ticketNumber}
+                  </p>
+                  <p className="text-xs text-[var(--ink-soft)]">
+                    {a.status}
+                    {a.checkedIn ? " · checked in" : ""}
+                  </p>
+                  {a.qr ? (
+                    <div className="mt-3">
+                      <p className="text-base font-extrabold text-[var(--red)]">
+                        Show this QR at the door
+                      </p>
+                      <div className="mx-auto mt-3 inline-block rounded-2xl border-2 border-[var(--gold)] bg-white p-3">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={a.qr}
+                          alt={`Entry QR for ${a.fullName}`}
+                          className="h-48 w-48"
+                        />
                       </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-primary mt-3 !min-h-10 w-full !text-sm"
-                        onClick={() => setFocusQrId(a.id)}
-                        disabled={!a.qr && a.status !== "ISSUED"}
-                      >
-                        {a.qr || a.status === "ISSUED" ? "View QR Code" : "QR not available"}
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
+                      <div className="mt-3 space-y-2">
+                        <SaveQrButton
+                          qrDataUrl={a.qr}
+                          className="btn btn-secondary !min-h-10 w-full !text-sm"
+                          fileName={`united-in-joy-${a.fullName.replace(/\s+/g, "-").toLowerCase()}-qr.png`}
+                        />
+                        {a.link && (
+                          <Link
+                            className="btn btn-primary !min-h-10 w-full !text-sm"
+                            href={ticketPageHref(a.link, a.votingCredential, a.ticketToken)}
+                          >
+                            View QR Code
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-sm text-[var(--ink-soft)]">
+                      {a.status === "PENDING"
+                        ? "QR will appear after approval."
+                        : "QR not available for this ticket."}
+                    </p>
+                  )}
+                </li>
+              ))}
             </ul>
             <button type="button" className="btn btn-secondary w-full" onClick={reset}>
               Look up another
